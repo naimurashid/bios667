@@ -1,0 +1,442 @@
+---
+title: "BIOS 667 — Lecture 3: Overview of Linear Models for Longitudinal Data"
+subtitle: "Fitzmaurice, Laird & Ware (2011) — Applied Longitudinal Data Analysis"
+author: "Naim Rashid"
+format:
+  revealjs:
+    theme: [default]
+    footer: BIOS 667 · UNC Gillings — Lecture 3 (Ch.3)
+    slide-number: true
+    hash: true
+    toc: false
+    code-overflow: wrap
+    code-line-numbers: false
+    math: mathjax
+    incremental: true
+    embed-resources: true
+    chalkboard: false
+    css: "unc-gillings.css"
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+
+# Lecture Goals
+
+## Today, You Will learn how to
+- Understand **vector and matrix notation**.
+- Introduce a more general form of the **linear regression model**.
+- Explore **descriptive methods**.
+- Review **historical approaches**.
+
+---
+
+
+# Notation and Distributional Assumptions
+
+## The Basics: Response Vector $\mathbf{Y}_i$
+::: {style="font-size: 0.8em;"}
+- $Y_{ij}$ is the response for the $i^{th}$ subject at the $j^{th}$ occasion.
+- Group the $n_i$ repeated measures for subject $i$ into a column vector:
+$$ \mathbf{Y}_{i} = \begin{pmatrix} Y_{i1} \\ Y_{i2} \\ \vdots \\ Y_{in_{i}} \end{pmatrix}_{n_i \times 1} $$
+- This is assumed independent across subjects, conditional on covariates.
+- Measures *within* a subject are **not independent**.
+:::  
+---
+
+## Example: Response Vector and Design Matrix
+- A subject's responses at three time points: 12, 10, and 9.
+- A subject's covariates: an intercept, time-varying sex, and time variable.
+
+---
+
+## Example: Response Vector and Design Matrix
+
+```{r, echo=TRUE}
+# Define the response vector for subject i
+Y_i <- c(12, 10, 9)
+print(Y_i)
+
+# Column 1: intercept, Column 2: Sex (0 = male), Column 3: Time
+X_i <- matrix(c(1, 0, 1,
+                1, 0, 2,
+                1, 0, 3), nrow = 3, byrow = TRUE)
+colnames(X_i) <- c("Intercept", "Sex", "Time")
+print(X_i)
+```
+
+---
+
+## Notation: Covariates $\mathbf{X}_{i}$
+- $\mathbf{X}_{ij}$ is a $p \times 1$ vector of covariates for response $Y_{ij}$.
+- Group these into a **design matrix** for subject $i$:
+$$ \mathbf{X}_{i} = \begin{pmatrix} \mathbf{X}_{i1}^{\top} \\ \mathbf{X}_{i2}^{\top} \\ \vdots \\ \mathbf{X}_{in_{i}}^{\top} \end{pmatrix}_{n_i \times p} $$
+- Can include **time-constant** (sex) or **time-varying** (age) covariates.
+
+---
+
+## Generalizing the Linear Regression Model
+::: {style="font-size: 0.8em;"}
+
+- The model for the observation vector of subject $i$ is:
+$$ \mathbf{Y}_{i} = \mathbf{X}_{i}\boldsymbol{\beta} + \mathbf{e}_{i} $$
+- **A specific feature**: the mean response is **linear in $\boldsymbol{\beta}$**.
+- **$\mathbf{Y}_i$**: The **response vector**.
+- **$\mathbf{X}_i$**: The **design matrix**.
+- **$\boldsymbol{\beta}$**: The **vector of regression parameters**.
+- **$\mathbf{e}_i$**: The **vector of random errors**, which are explicitly assumed to be zero-mean errors.
+:::  
+---
+
+## The Full Data Model
+::: {style="font-size: 0.9em;"}
+- We can stack data for all $N$ subjects into one model:
+$$ \mathbf{Y} = \mathbf{X}\boldsymbol{\beta} + \mathbf{e} $$
+- Where $\mathbf{Y} = (\mathbf{Y}_1^{\top}, \dots, \mathbf{Y}_N^{\top})^{\top}$ and $\mathbf{e} = (\mathbf{e}_1^{\top}, \dots, \mathbf{e}_N^{\top})^{\top}$.
+- $\mathbf{X}$ is formed by **stacking the subject-specific design matrices** $\mathbf{X}_i$. $\mathbf{X}$ is generally not block-diagonal.
+- The covariance matrix for the full data set, $\mathbf{V}$, is block-diagonal:
+$$ \mathbf{V} = \mathrm{diag}(\mathbf{V}_1, \mathbf{V}_2, \dots, \mathbf{V}_N) $$
+:::  
+---
+
+## In Summary
+- The model is defined by two key parts:
+  - **Mean Structure**: $E(\mathbf{Y}_{i}) = \mathbf{X}_{i}\boldsymbol{\beta}$
+  - **Covariance Structure**: $\mathrm{Cov}(\mathbf{Y}_{i}) = \mathbf{V}_{i}$
+
+---
+
+# Distributional Assumptions
+
+## Why Multivariate Normal?
+- We assume the vector of responses for subject $i$ is multivariate normal:
+$$ \mathbf{Y}_i \sim N_{n_i}(\mathbf{X}_i\boldsymbol{\beta}, \mathbf{V}_i) $$
+- **The 'working' assumption**: This assumption is a **convenience** for statistical theory. It helps us to derive the estimators for $\boldsymbol{\beta}$ and $\mathbf{V}_i$ and to conduct hypothesis tests.
+- **The takeaway**: The methods here **do not strictly require it**. Our estimators and inferences are generally robust to deviations from normality.
+
+---
+
+## Is it Really Multivariate Normal?
+- Unlike the univariate case, it is very difficult to formally verify the multivariate normal assumption.
+- Formal statistical tests exist but are often unhelpful, as they can detect departures that are not substantively important.
+
+---
+
+## Practical Checks for Normality
+- A better approach is to use simple graphical displays to check for **gross departures** from normality.
+- We can examine **histograms and boxplots of the residuals** for each time point to see if they are approximately normal.
+- We can also use **scatterplots of residuals** for all possible pairs of time points to look for any obvious departures from a linear trend.
+- **Caveat**: These graphical checks can only provide evidence of departures from multivariate normality. They cannot be used to prove that the assumption holds.
+
+
+---
+
+## Why Normality Isn't So Critical
+- At this point, you might be concerned about making this hard-to-verify assumption.
+- Fortunately, the assumption of multivariate normality is **not as critical** for estimation and valid inferences about $\boldsymbol{\beta}$ as the assumptions about the **independence** and the **covariance of the errors** within an individual.
+- **The takeaway**: Unless departures from normality are very extreme (e.g., highly skewed data), they are not as critical as ensuring you have correctly modeled the dependence among the repeated measurements.
+
+---
+
+## Common Pitfalls
+- **Don't confuse mean model misspecification with covariance misspecification.** Misspecifying the mean model (e.g., using a linear trend when the data is quadratic) is a bigger problem than misspecifying the covariance structure.
+- **Don't overstate the role of normality.** It's a working assumption for maximum likelihood (ML) estimation, not a strict requirement for all longitudinal methods. Many methods are robust to non-normal data.
+
+---
+
+## A Note on Notation
+- For simplicity, we will often use simplified notation:
+  - $E(\mathbf{Y}_i)$ will be used for $E(\mathbf{Y}_i | \mathbf{X}_i)$.
+  - $Cov(\mathbf{Y}_i)$ will be used for $Cov(\mathbf{Y}_i | \mathbf{X}_i)$.
+- It should be understood that we are always referring to the **conditional** distribution of $\mathbf{Y}_i$ given the covariates.
+
+
+# Descriptive Methods
+
+## Why Visualizing Data First is Key
+- Before modeling, we need to understand the patterns in our data.
+- **Goal**: To see individual trajectories and overall trends.
+
+---
+
+## The Spaghetti Plot
+- A **spaghetti plot** connects successive repeated measures for each individual.
+- **Takeaway**: This shows the **individual trajectories** and how they might differ from the group trend.
+
+## The Spaghetti Plot
+```{r fig.align="center"}
+#| echo: true
+#| output-location: slide
+
+# Load packages
+library(dplyr)
+library(ggplot2)
+
+# Create mock longitudinal data
+set.seed(123)
+data_long <- tibble(
+  subject = rep(1:20, each = 5),
+  time = rep(1:5, times = 20),
+  response = rnorm(100, mean = 50 + 2*time + 0.5*subject, sd = 5)
+)
+
+# Create the plot
+ggplot(data_long, aes(x = time, y = response, group = subject)) +
+  geom_line(alpha = 0.6) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Spaghetti Plot", x = "Time", y = "Response") +
+  theme_minimal()
+```
+
+---
+
+## The Mean Trajectory Plot
+- A **mean trajectory plot** reveals the overall trend in the data.
+- **Takeaway**: This shows the **overall trend** of the group and a confidence interval for that trend.
+
+## The Mean Trajectory Plot
+
+```{r fig.align="center"}
+#| echo: true
+#| output-location: slide
+# Summarize data
+summary_data <- data_long %>%
+  group_by(time) %>%
+  summarize(
+    mean_response = mean(response),
+    sd_response = sd(response),
+    n = n(),
+    se_response = sd_response / sqrt(n)
+  )
+
+# Create the plot with a ribbon for uncertainty
+ggplot(summary_data, aes(x = time, y = mean_response)) +
+  geom_line(color = "blue", size = 1.5) +
+  geom_point(color = "blue", size = 3) +
+  geom_ribbon(aes(ymin = mean_response - 1.96 * se_response,
+                  ymax = mean_response + 1.96 * se_response),
+              alpha = 0.2, fill = "blue") +
+  labs(title = "Mean Trajectory with 95% CI", x = "Time", y = "Mean Response") +
+  theme_minimal()
+```
+
+---
+
+## The Correlation Heatmap
+- A **correlation heatmap** shows pairwise correlations between repeated measures.
+- **Takeaway**: This shows how the **correlation decays over time**. Do measurements far apart in time have a lower correlation?
+
+## The Correlation Heatmap
+
+```{r fig.align="center"}
+#| echo: true
+#| output-location: slide
+# Load packages
+library(tidyr)
+
+# Pivot data to a wide format
+wide_data <- data_long %>%
+  select(subject, time, response) %>%
+  pivot_wider(names_from = time, values_from = response) %>%
+  select(-subject)
+
+# Calculate correlation matrix
+cor_matrix <- cor(wide_data, use = "pairwise.complete.obs")
+
+# Tidy matrix for plotting
+cor_long <- cor_matrix %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("Time1") %>%
+  pivot_longer(-Time1, names_to = "Time2", values_to = "Correlation")
+
+# Create the heatmap
+ggplot(cor_long, aes(x = Time1, y = Time2, fill = Correlation)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "red", high = "blue", mid = "white",
+                       midpoint = 0, limit = c(-1,1), name = "Correlation") +
+  theme_minimal() +
+  labs(title = "Correlation Heatmap")
+```
+
+---
+
+# Modeling the Covariance
+
+## Why We Must Model the Covariance
+
+- A **defining feature** of longitudinal data is that repeated responses on the same individual are **correlated**.
+- This correlation **cannot be ignored**.
+- **Properly accounting for covariance**:
+  - Yields **valid inferences** about your regression parameters.
+  - Increases the **efficiency** (precision) of your estimates.
+  - Is required for **valid estimates** with missing data.
+
+---
+
+## The Three Main Approaches
+
+- There are three broad strategies for modeling the covariance among repeated measures:
+  1.  **Unstructured Covariance**: Allowing a completely arbitrary pattern.
+  2.  **Covariance Pattern Models**: Placing a specific structure on the covariance.
+  3.  **Random Effects**: Introducing individual-specific effects to induce a structure.
+
+---
+
+## Approach 1: Unstructured Covariance
+
+- This approach assumes **no explicit structure** for the covariance.
+- It estimates the unique variance for each time point and the covariance for every possible pair of time points.
+- **Key Feature**: Provides a completely **flexible** and arbitrary pattern of covariance.
+
+---
+
+## Drawbacks of Unstructured Covariance
+
+- **Parameter-Heavy**: The number of parameters can be very large ($\frac{n(n+1)}{2}$). With 10 time points, that's 55 parameters to estimate!
+- **Unstable Estimates**: Can lead to unstable estimates if the sample size is small relative to the number of parameters.
+- **Data Limitations**: **Cannot accommodate** irregularly timed measurements or missing data. It requires all individuals to be measured at the exact same occasions.
+
+---
+
+## Approach 2: Covariance Pattern Models
+::: {style="font-size: 0.9em;"}
+- This approach places a **specific, parsimonious structure** on the covariance matrix.
+- It is inspired by **time series analysis**.
+- **Key Idea**: The correlation between repeated measures **decays** as the time separation increases (e.g., measurements taken a week apart are more correlated than those a year apart).
+- These models use only a few parameters to describe the entire covariance structure.
+:::  
+---
+
+## Approach 3: Random Effects
+
+- This is an alternative, **indirect** way to model the covariance.
+- It accounts for correlation by introducing **individual-specific random effects** into the model.
+- **Example**: A simple random intercept can represent all unobserved factors that make some subjects naturally higher or lower responders.
+- The inclusion of random effects imposes a covariance structure.
+
+---
+
+## Benefits of Random Effects
+
+- **Flexibility and Parsimony**: Random effects models can be very flexible while remaining parsimonious (using fewer parameters).
+- **Handles Irregular Data**: They are particularly well-suited for **irregularly timed data** and can naturally handle missing observations.
+- We can include multiple random effects (e.g., random intercepts and random slopes) to create more flexible and realistic correlation patterns.
+
+---
+
+## Summary of Covariance Approaches
+::: {style="font-size: 0.8em;"}
+| Approach | Pros | Cons |
+| :--- | :--- | :--- |
+| **Unstructured** | Most flexible. | Parameter-heavy, requires complete and equally spaced data. |
+| **Covariance Pattern** | Parsimonious, can handle irregular timing. | Assumes a specific pattern (e.g., decaying correlation). |
+| **Random Effects** | Very flexible and parsimonious, naturally handles irregular timing and missing data. | The imposed structure can sometimes be too restrictive (e.g., simple random intercept model). |
+:::  
+---
+
+## Covariance Structure Visualized
+::: {style="font-size: 0.8em;"}
+- **Compound Symmetry (CS)** assumes a constant correlation ($\rho$) for any pair of times.
+- **AR(1)** assumes correlation decays exponentially as time separation increases ($\rho^k$).
+
+| Correlation Matrix (CS) | Correlation Matrix (AR(1)) |
+| :--- | :--- |
+| $$ \begin{pmatrix} 1 & \rho & \rho & \rho \\ \rho & 1 & \rho & \rho \\ \rho & \rho & 1 & \rho \\ \rho & \rho & \rho & 1 \end{pmatrix} $$ | $$ \begin{pmatrix} 1 & \rho & \rho^2 & \rho^3 \\ \rho & 1 & \rho & \rho^2 \\ \rho^2 & \rho & 1 & \rho \\ \rho^3 & \rho^2 & \rho & 1 \end{pmatrix} $$ |
+:::  
+---
+
+# Historical Approaches
+
+## The Three Classical Approaches
+- Summary Measures
+- Univariate Repeated Measures ANOVA
+- Multivariate Analysis of Variance (MANOVA)
+
+---
+
+## Why We Don't Use Them Anymore
+::: {style="font-size: 0.8em;"}
+
+| Method | Advantage | Disadvantage |
+| :--- | :--- | :--- |
+| **Summary Measures** | Simple, easy to use | Discards information about individual trajectories |
+| **Univariate ANOVA** | Easy to perform | Requires restrictive **compound symmetry** assumption |
+| **MANOVA** | Does **not** require a covariance structure | Cannot handle missing data |
+
+:::  
+
+---
+
+## Method 1: Summary Measures
+- The simplest approach: reduce repeated measures to a **single summary measure**.
+- **Examples**: Mean response or regression slope.
+- **Limitation**: This approach discards information about individual trajectories.
+
+---
+
+## Method 2: Univariate Repeated Measures ANOVA
+::: {style="font-size: 0.9em;"}
+- An extension of ANOVA.
+- **Assumption**: A specific covariance structure called **compound symmetry**.
+- This assumes equal variances and a constant correlation for any pair of times, which is often inappropriate for longitudinal data where correlation typically decays with time separation.
+- **Solution**: **Greenhouse and Geisser (1959)** developed an adjustment to the F-test to correct this.
+:::  
+---
+
+## Method 3: Multivariate Analysis of Variance (MANOVA)
+- Treats repeated measures as a single, multi-dimensional outcome.
+- **Advantage**: Does **not** assume a specific covariance structure; it estimates an **unstructured** matrix.
+- **Limitation**: Requires a complete set of measurements for every subject. With irregular timing or missingness, it drops subjects from the analysis.
+
+---
+
+## The Missing Data Problem in MANOVA
+::: {style="font-size: 0.9em;"}
+
+- MANOVA requires a complete set of measurements for every subject.
+- Subjects with any missing data are excluded from the analysis.
+- **Example**: Subject 2 below would be dropped.
+
+| Subject | Time 1 | Time 2 | Time 3 | Time 4 |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | 12 | 10 | 9 | 11 |
+| 2 | 15 | 14 | **-** | 13 |
+| 3 | 11 | 12 | 10 | 12 |
+
+:::  
+---
+
+## Comparison of Covariance Assumptions
+- **Univariate ANOVA**: **Compound symmetry**. Restrictive, but only 2 parameters.
+- **MANOVA**: **Unstructured**. Flexible, but many parameters.
+- **Modern Methods (Coming soon!):** A happy medium, with more realistic and parsimonious structures.
+
+---
+
+# Summary of the general form for the  Linear Model
+
+## The Core Components
+- The general linear model has two parts:
+  1.  **Mean Structure**: $E(\mathbf{Y}_i) = \mathbf{X}_i\boldsymbol{\beta}$ (how the average response changes).
+  2.  **Covariance Structure**: $\mathrm{Cov}(\mathbf{Y}_i) = \mathbf{V}_i$ (how measures are correlated).
+
+---
+
+## The Main Challenge
+- **The covariance structure** makes longitudinal analysis unique.
+- We must account for the non-independence of repeated measures.
+- Choosing a model for $\mathbf{V}_i$ that is both **flexible** and **parsimonious** is the main challenge.
+
+---
+
+## What Comes Next?
+- Upcoming chapters will cover **modern approaches** that are more flexible and robust.
+- We will learn how to:
+  - Account for serial correlation.
+  - Model random variation.
+  - Handle incomplete data.
+
+---
+

@@ -1,0 +1,62 @@
+---
+title: "BIOS 667 · Applied Longitudinal Data Analysis (UNC-CH) · Fall 2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(dplyr)
+library(tibble)
+library(knitr)
+library(kableExtra)
+
+sched_raw <- tibble::tribble(
+  ~Date,     ~Topic,  ~HW_href,  ~Lecture_href,
+  "8/18/25", "Course intro; Longitudinal & clustered data (Ch 1)",                                     "hw/hw01.html",     "lectures/lec01.Rmd",
+  "8/20/25", "Longitudinal data: basic concepts & objectives (Ch 2)",                                  "hw/hw02.html",     "lectures/lec02.Rmd",
+  "8/25/25", "Overview: linear models for longitudinal continuous data (Ch 3)",                        "hw/hw03.html",     "lectures/lec03.Rmd",
+  "8/27/25", "Estimation & inference; ML/REML; missing-data setup (Ch 4)",                             "hw/hw04.html",     "lectures/lec04.Rmd",
+  "9/3/25",  "Modeling the mean: response profiles I (Ch 5)",                                          "hw/hw05.html",     "lectures/lec05.Rmd",
+  "9/8/25",  "Response profiles II: baseline adj., 1-df tests, strengths/limits (Ch 5)",               "hw/hw06.html",     "lectures/lec06.Rmd",
+  "9/10/25", "Modeling the mean: parametric time trends & splines (Ch 6)",                             "hw/hw07.html",     "lectures/lec07.Rmd",
+  "9/17/25", "Modeling the covariance: structures, selection, case study (Ch 7)",                      "hw/hw08.html",     "lectures/lec08.Rmd",
+  "9/22/25", "Linear mixed-effects models I: formulation & covariance (Ch 8)",                         "hw/hw09.html",     "lectures/lec09.Rmd",
+  "9/24/25", "Linear mixed-effects models II: prediction & shrinkage, case studies (Ch 8)",            "hw/hw10.html",     "lectures/lec10.Rmd",
+  "9/29/25", "Fixed vs random effects; bias-variance; within/between effects (Ch 9)",                  "hw/hw11.html",     "lectures/lec11.Rmd",
+  "10/1/25", "Residuals & diagnostics for longitudinal models (Ch 10)",                                "hw/hw12.html",     "lectures/lec12.Rmd",
+  "10/6/25", "Worked examples lab (continuous outcomes): covariance choice & LME practice (Ch 5–10)",  "hw/hw13.html",     "lectures/lec13.Rmd",
+  "10/8/25", "Review of generalized linear models; links; overdispersion; ordinal models (Ch 11)",     "hw/hw14.html",     "lectures/lec14.Rmd",
+  "10/13/25","Marginal models for longitudinal data: overview & examples (Ch 12)",                     "hw/hw15.html",     "lectures/lec15.Rmd",
+  "10/15/25","GEE I: estimating equations, working correlation, robust variance (Ch 13)",              "hw/hw16.html",     "lectures/lec16.Rmd",
+  "10/20/25","GEE II: diagnostics; time-varying covariates; case studies (Ch 13)",                      "hw/hw17.html",     "lectures/lec17.Rmd",
+  "10/22/25","GLMMs I: random effects in GLMs; interpretation; overdispersion (Ch 14)",                "hw/hw18.html",     "lectures/lec18.Rmd",
+  "10/27/25","GLMMs II: estimation & inference; examples (Ch 14)",                                     "hw/hw19.html",     "lectures/lec19.Rmd",
+  "10/29/25","Approximate GLMM methods: PQL/MQL; when (not) to use them (Ch 15)",                      "hw/hw20.html",     "lectures/lec20.Rmd",
+  "11/3/25", "Contrasting marginal vs mixed models; numerical illustration (Ch 16)",                   "hw/hw21.html",     "lectures/lec21.Rmd",
+  "11/5/25", "Missing data & dropout: mechanisms, implications, dropout (Ch 17)",                      "hw/hw22.html",     "lectures/lec22.Rmd",
+  "11/10/25","Multiple imputation & inverse-probability weighting; case studies (Ch 18)",              "hw/hw23.html",     "lectures/lec23.Rmd",
+  "11/12/25","Smoothing longitudinal data: penalized splines & LME connection (Ch 19)",                "hw/hw24.html",     "lectures/lec24.Rmd",
+  "11/17/25","Sample size & power for longitudinal designs (cont./bin.) (Ch 20)",                      "hw/hw25.html",     "lectures/lec25.Rmd",
+  "11/19/25","Repeated-measures experiments & multiple-source data (Ch 21)",                           "hw/hw26.html",     "lectures/lec26.Rmd",
+  "11/24/25","Multilevel (hierarchical) models: linear & GLM (Ch 22)",                                 "hw/hw27.html",     "lectures/lec27.Rmd",
+  "12/1/25", "Capstone case study lab & project workshop (integrates Ch 5–22)",                        "hw/hw28.html",     "lectures/lec28.Rmd",
+  "12/3/25", "Synthesis & (optional) lightning presentations; wrap-up",                                "hw/hw29.html",     "lectures/lec29.Rmd"
+)
+
+sched <- sched_raw %>%
+  mutate(
+    Week = ceiling(row_number()/2),  # week count
+    HW = sprintf('<a href="%s">%s</a>', HW_href, sub("^hw/", "", sub("\\.html$", "", HW_href))),
+    Lecture_Rmd = sprintf('<a href="%s">%s</a>', Lecture_href, basename(Lecture_href))
+  ) %>%
+  select(Week, Date, Topic, HW, Lecture_Rmd)
+
+
+```
+
+```{r}
+kable(sched, align = "l", escape = FALSE, caption = "Course Schedule — BIOS 667 (Fall 2025)") %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+

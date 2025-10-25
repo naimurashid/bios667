@@ -1,0 +1,976 @@
+---
+title: "Generalized Linear Models (Chapter 11)"
+subtitle: "BIOS 667: Applied Longitudinal Data Analysis"
+author: "Naim Rashid, PhD  |  UNC Biostatistics"
+format:
+  revealjs:
+    theme: [default]
+    footer: BIOS 667 · UNC Gillings — Lecture 11 (Ch.11)
+    slide-number: true
+    hash: true
+    toc: false
+    code-overflow: wrap
+    code-line-numbers: false
+    math: mathjax
+    incremental: true
+    embed-resources: true
+    chalkboard: false
+    css: "unc-gillings.css"
+    scrollable: true
+execute:
+  warning: false
+  message: false
+---
+
+## Part 1: Introduction
+
+---
+
+## Why Generalized Linear Models?
+
+- Linear models assume:
+  - Normally distributed $Y$
+  - Constant variance
+  - Additive effects
+- But many outcomes are **non-normal**:
+  - Binary (0 or 1)
+  - Counts
+  - Proportions, rates
+- GLMs extend the linear model using:
+  - A **link function** $g(\cdot)$
+  - A **distribution** from the *exponential family*
+  - A **systematic component** $X\beta$
+
+---
+
+## GLM Framework
+
+Each response $Y_i$ follows a distribution in the exponential family:
+
+$$
+f(y_i|\theta_i,\phi) =
+\exp\!\left[
+\frac{y_i\theta_i - b(\theta_i)}{a(\phi)} + c(y_i,\phi)
+\right]
+$$
+
+where  
+$\mathbb{E}(Y_i)=\mu_i=b'(\theta_i)$ and  
+$\text{Var}(Y_i)=b''(\theta_i)a(\phi)$.
+
+**Key takeaway:** You don’t need to memorize this.  
+What matters is that this single form unifies the *Normal, Binomial, Poisson,* and others — enabling one modeling framework.
+
+---
+
+## GLM Components
+
+| Component | Description | Example |
+|------------|-------------|----------|
+| Random | $Y_i$ from exponential family | Binary, Count |
+| Systematic | Linear predictor $\eta_i = X_i^\top\beta$ | $\eta_i=\beta_0+\beta_1x_i$ |
+| Link | $g(\mu_i)=\eta_i$ | logit, log, identity |
+
+---
+
+## Canonical Links
+
+| Distribution | Mean–Variance | Canonical Link |
+|---------------|----------------|----------------|
+| Normal | $\mu,\;\sigma^2$ | identity |
+| Binomial | $p,\;p(1-p)$ | logit |
+| Poisson | $\mu,\;\mu$ | log |
+| Gamma | $\mu,\;\mu^2$ | inverse |
+
+---
+
+## Estimation: Iteratively Reweighted Least Squares (IRLS)
+
+GLM parameters $\beta$ are found via *maximum likelihood* using the IRLS algorithm.  
+It’s conceptually similar to least squares, but each step uses updated weights:
+
+$$
+W_i = \left( \frac{\partial \mu_i}{\partial \eta_i} \right)^2 / \text{Var}(Y_i)
+$$
+
+---
+
+## Diagnostic Goals for GLMs
+
+- Assess **link function** adequacy  
+- Check **mean–variance** relationship  
+- Identify **influential** observations  
+- Evaluate **overdispersion** (Poisson, Binomial)
+
+---
+
+## Part 2: Logistic Regression
+
+---
+
+## Binary Data Example
+
+```{r}
+#| echo: true
+#| output-location: slide
+set.seed(667)
+library(dplyr)
+library(ggplot2)
+library(broom)
+
+N <- 200
+dat <- tibble(
+  id = 1:N,
+  trt = rbinom(N, 1, 0.5),
+  time = rnorm(N, 0, 1)
+) %>%
+  mutate(
+    linpred = -0.5 + 0.95*trt + 0.7*time,
+    p = plogis(linpred),
+    y_bin = rbinom(N, 1, p),
+    trt = factor(trt, labels = c("Ctl", "Tx"))
+  )
+
+head(dat)
+```
+
+---
+
+---
+
+## Logistic GLM: Fit
+
+```{r}
+#| echo: true
+#| output-location: slide
+# Assumes 'dat' exists with y_bin (0/1), trt (Ctl/Tx), time (numeric)
+fit_logit <- glm(y_bin ~ trt * time, data = dat, family = binomial)
+summary(fit_logit)
+```
+
+---
+
+## Logistic: Odds Ratios & CIs
+
+```{r}
+#| echo: true
+#| output-location: slide
+suppressPackageStartupMessages(library(broom))
+or_tab <- broom::tidy(fit_logit, conf.int = TRUE) |>
+  dplyr::mutate(
+    OR      = exp(estimate),
+    OR_low  = exp(conf.low),
+    OR_high = exp(conf.high)
+  ) |>
+  dplyr::select(term, estimate, OR, OR_low, OR_high, p.value)
+or_tab
+```
+
+---
+
+## Interpreting Logistic Coefficients (Log-Odds → Odds)
+
+- Model on **log-odds** scale:
+  $$
+  \log\!\left(\frac{\pi}{1-\pi}\right) = \beta_0 + \beta_1 x_1 + \cdots + \beta_p x_p
+  $$
+- A one-unit increase in $x_j$ changes **log-odds** by $\beta_j$.  
+- Exponentiating gives an **odds ratio** (OR): $e^{\beta_j}$.  
+  - $e^{\beta_j} > 1$: odds of \(Y=1\) increase  
+  - $e^{\beta_j} < 1$: odds of \(Y=1\) decrease
+
+---
+
+
+
+
+## Visualize Fitted Probabilities by Time & Treatment
+
+```{r}
+#| echo: true
+#| output-location: slide
+suppressPackageStartupMessages(library(ggplot2))
+newdat <- expand.grid(
+  trt = c("Ctl","Tx"),
+  time = seq(min(dat$time, na.rm=TRUE), max(dat$time, na.rm=TRUE), length=100)
+)
+newdat$pred_prob <- predict(fit_logit, newdata = newdat, type = "response")
+ggplot(newdat, aes(time, pred_prob, color = trt)) +
+  geom_line(linewidth = 1.2) +
+  labs(y = "Predicted P(Y=1)", title = "Logistic Regression Fitted Probabilities") +
+  theme_minimal()
+```
+
+---
+
+## From Coefficients to Predicted Probabilities
+
+- Logistic inverse link:
+  $$
+  \hat\pi_i = \frac{e^{X_i^\top\hat\beta}}{1 + e^{X_i^\top\hat\beta}}
+  $$
+- In R, use `predict(fit, type = "response")` to obtain \(\hat\pi_i\).
+
+```{r}
+#| echo: true
+#| output-location: slide
+dat$pred_prob <- predict(fit_logit, type = "response")
+head(dat[, c("y_bin", "trt", "time", "pred_prob")])
+```
+
+---
+
+## Predicted Probabilities vs Observed Outcome
+
+```{r}
+#| echo: true
+#| output-location: slide
+ggplot(dat, aes(pred_prob, fill = factor(y_bin))) +
+  geom_histogram(bins = 20, position = "identity", alpha = 0.55) +
+  labs(title = "Predicted Probabilities by Observed Outcome",
+       x = "Predicted P(Y=1)", fill = "Observed Y") +
+  theme_minimal()
+```
+
+---
+
+## Using Probabilities for Classification
+
+We choose a **threshold** \(t\) and predict:
+\[
+\widehat{Y} =
+\begin{cases}
+1, & \text{if } \hat\pi \ge t \\
+0, & \text{otherwise}
+\end{cases}
+\]
+
+- Default \(t=0.5\), but it can be tuned for the application (balance sensitivity/specificity, costs).
+
+```{r}
+#| echo: true
+#| output-location: slide
+dat$pred_class_05 <- ifelse(dat$pred_prob >= 0.5, 1, 0)
+table(Predicted = dat$pred_class_05, Observed = dat$y_bin)
+mean(dat$pred_class_05 == dat$y_bin)  # accuracy at t = 0.5
+```
+
+---
+
+## Threshold Tuning: Accuracy Across Thresholds
+
+```{r}
+#| echo: true
+#| output-location: slide
+ths <- seq(0.05, 0.95, by = 0.05)
+acc <- sapply(ths, function(t){
+  pc <- as.integer(dat$pred_prob >= t)
+  mean(pc == dat$y_bin)
+})
+acc_df <- data.frame(threshold = ths, accuracy = acc)
+ggplot(acc_df, aes(threshold, accuracy)) +
+  geom_line(linewidth = 1.1) + geom_point(size = 2) +
+  labs(title = "Accuracy vs Threshold", y = "Accuracy") +
+  theme_minimal()
+```
+
+---
+
+## Beyond Accuracy: Sensitivity & Specificity
+
+- **Sensitivity (TPR):** \(P(\widehat{Y}=1 \mid Y=1)\)  
+- **Specificity (TNR):** \(P(\widehat{Y}=0 \mid Y=0)\)  
+- Varying the threshold traces a **ROC curve** (TPR vs FPR).
+
+---
+
+## ROC Curve & AUC
+
+```{r}
+#| echo: true
+#| output-location: slide
+suppressPackageStartupMessages(library(pROC))
+roc_obj <- roc(dat$y_bin, dat$pred_prob, quiet = TRUE)
+plot(roc_obj, main = paste0("ROC Curve (AUC = ", round(auc(roc_obj), 3), ")"))
+```
+
+---
+
+## Interpreting ROC/AUC
+
+- **AUC** = probability a randomly chosen positive has higher \(\hat\pi\) than a randomly chosen negative.  
+- **AUC ranges**:  
+  - 0.5: no discrimination  
+  - 0.7–0.8: acceptable  
+  - 0.8–0.9: excellent  
+  - >0.9: outstanding (rare in practice)
+
+---
+
+## Calibration: Predicted vs Observed
+
+```{r}
+#| echo: true
+#| output-location: slide
+# Decile-based calibration plot
+set.seed(1)
+dd <- dat |>
+  dplyr::mutate(dec = cut(pred_prob, breaks = quantile(pred_prob, probs = seq(0,1,0.1), na.rm=TRUE),
+                          include.lowest = TRUE)) |>
+  dplyr::group_by(dec) |>
+  dplyr::summarise(
+    mean_pred = mean(pred_prob),
+    obs_rate  = mean(y_bin),
+    n = dplyr::n(),
+    .groups = "drop"
+  )
+ggplot(dd, aes(mean_pred, obs_rate, size = n)) +
+  geom_point(alpha = 0.8) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(title = "Calibration Plot (Deciles)",
+       x = "Mean Predicted Probability",
+       y = "Observed Event Rate") +
+  theme_minimal()
+```
+
+---
+
+## Logistic Diagnostics: Residuals
+
+```{r}
+#| echo: true
+#| output-location: slide
+res_df <- data.frame(
+  fitted = fitted(fit_logit),
+  dev    = residuals(fit_logit, type = "deviance"),
+  pear   = residuals(fit_logit, type = "pearson")
+)
+p1 <- ggplot(res_df, aes(fitted, dev)) + geom_point(alpha = .6) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Deviance Residuals vs Fitted") + theme_bw()
+p2 <- ggplot(res_df, aes(fitted, pear)) + geom_point(alpha = .6) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "Pearson Residuals vs Fitted") + theme_bw()
+print(p1); print(p2)
+```
+
+---
+
+## Influence & Leverage
+
+```{r}
+#| echo: true
+#| output-location: slide
+inf <- influence.measures(fit_logit)
+summ <- summary(inf)
+# Quick look at leverage and Cook's D
+lev <- hatvalues(fit_logit)
+cd  <- cooks.distance(fit_logit)
+par(mfrow = c(1,2))
+plot(lev, type = "h", main = "Leverage (hat)", ylab = "hat")
+abline(h = 2*mean(lev), col = "red", lty = 2)
+plot(cd, type = "h", main = "Cook's Distance", ylab = "Cook's D")
+abline(h = 4/length(cd), col = "red", lty = 2)
+par(mfrow = c(1,1))
+```
+
+---
+
+## Goodness-of-Fit (Binomial): Hosmer–Lemeshow
+
+```{r}
+#| echo: true
+#| output-location: slide
+if (requireNamespace("ResourceSelection", quietly = TRUE)) {
+  library(ResourceSelection)
+  # Group into g=10 risk deciles by default
+  hl <- hoslem.test(dat$y_bin, fitted(fit_logit), g = 10)
+  hl
+} else {
+  cat("Install 'ResourceSelection' for Hosmer–Lemeshow test.\n")
+}
+```
+
+---
+
+## Quick Checklist for Logistic Models
+
+- Coefficients → **odds ratios** (constant across covariates)  
+- Predicted probabilities via `type="response"`  
+- Classification requires a **threshold** (context-dependent)  
+- Evaluate discrimination: **ROC/AUC**  
+- Check calibration: predicted vs observed  
+- Inspect residuals, leverage, and **influence**  
+- Consider re-specification (nonlinearity, interactions) if patterns remain
+
+---
+
+## Transition to Count Outcomes
+
+- Now assess **ER visits in 1 year**
+- Poisson GLM assumptions: $\operatorname{Var}(Y)=\mu$
+- Overdispersion common; consider **quasi-Poisson** or **negative binomial**
+
+---
+
+## Simulate Count Outcome: ER Visits
+
+```{r}
+#| echo: true
+#| output-location: slide
+set.seed(668)
+n   <- 1500
+age <- rnorm(n, 50, 15)
+chronic <- rbinom(n, 1, 0.35)             # chronic condition
+exposure <- runif(n, 0.6, 1.0)            # person-years
+lp <- -0.3 + 0.015*(age-50) + 0.7*chronic + log(exposure)
+mu <- exp(lp)
+y_ct <- rpois(n, mu)                       # base Poisson (we'll induce some OD)
+# Inflate variance for 30% by adding a latent gamma-multiplier
+od_idx <- sample.int(n, size=round(.30*n))
+y_ct[od_idx] <- rpois(length(od_idx), mu[od_idx]*rgamma(length(od_idx),1,1))
+cnt_dat <- tibble(y=y_ct, age, chronic=factor(chronic, labels=c("No","Yes")), exposure)
+glimpse(cnt_dat)
+```
+
+---
+
+## Fit Poisson GLM
+
+```{r}
+#| echo: true
+#| output-location: slide
+# --- FIX: Updated the model formula to match the simulated data ---
+# Use an offset for exposure to model the rate correctly.
+fit_pois <- glm(y ~ age + chronic + offset(log(exposure)), data=cnt_dat, family=poisson)
+summary(fit_pois)
+```
+
+---
+
+## Poisson GLM: Interpret Rate Ratios
+
+- **Estimate (log-rate):** $\hat\beta_{\text{chronicYes}} \approx 0.68$
+- **Exponentiate:** $e^{0.68} \approx 1.97$
+- **Interpretation:** “Holding age and exposure constant, the estimated *rate* of ER visits for a patient with a chronic condition is **1.97 times** the rate for a patient without a chronic condition.”
+
+---
+
+## Visualize Fitted Counts
+
+```{r}
+#| echo: true
+#| output-location: slide
+# --- FIX: Create a new data grid based on the correct predictors (age, chronic) ---
+newd <- expand.grid(
+  age = seq(20, 80, length.out=100),
+  chronic = c("No", "Yes"),
+  exposure = mean(cnt_dat$exposure) # Hold exposure constant at the mean
+)
+newd$pred <- predict(fit_pois, newdata=newd, type="response")
+ggplot(newd, aes(age, pred, color=chronic)) +
+  geom_line(linewidth=1.1) +
+  labs(y="Predicted ER Visits / Year", x = "Age", title="Poisson GLM: Predicted ER Visit Rate") +
+  theme_minimal()
+```
+
+---
+
+## Poisson Diagnostics: Pearson Residuals
+
+```{r}
+#| echo: true
+#| output-location: slide
+pp <- tibble(
+  fitted = fitted(fit_pois),
+  rpear = residuals(fit_pois, type="pearson")
+)
+ggplot(pp, aes(fitted, rpear)) +
+  geom_point(alpha=.6) +
+  geom_hline(yintercept=0, linetype="dashed") +
+  labs(title="Poisson: Pearson Residuals vs Fitted") +
+  theme_bw()
+```
+
+Interpretation: Notice the **fanning out** pattern?  
+As fitted values increase, the variance grows faster than the mean — a hallmark of **overdispersion**.
+
+---
+
+## Checking for Overdispersion
+
+```{r}
+#| echo: true
+#| output-location: slide
+phi_hat <- sum(residuals(fit_pois, type="pearson")^2) / fit_pois$df.residual
+phi_hat
+```
+
+- If $\hat\phi>1$, variance > mean → **overdispersion** - Remedy: use **quasi-Poisson** or **Negative Binomial**
+
+---
+
+## Quasi-Poisson Model
+
+```{r}
+#| echo: true
+#| output-location: slide
+# --- FIX: Updated model formula ---
+fit_qp <- glm(y ~ age + chronic + offset(log(exposure)), data=cnt_dat, family=quasipoisson)
+summary(fit_qp)
+```
+
+---
+
+## Compare Poisson vs Quasi-Poisson
+
+| Model | Dispersion | SE Behavior | Interpretation |
+|-------|-------------|--------------|----------------|
+| Poisson | Fixed = 1 | Underestimates SEs if variance > mean | May inflate significance |
+| Quasi-Poisson | Estimated | SEs robust to overdispersion | Coefficients unchanged |
+
+---
+
+## Negative Binomial (Optional Extension)
+
+```{r}
+#| echo: true
+#| output-location: slide
+# --- FIX: Updated model formula ---
+suppressPackageStartupMessages(library(MASS))
+fit_nb <- glm.nb(y ~ age + chronic + offset(log(exposure)), data=cnt_dat)
+summary(fit_nb)
+```
+
+---
+
+## Poisson Influence Diagnostics
+
+```{r}
+#| echo: true
+#| output-location: slide
+suppressPackageStartupMessages(library(car))
+influencePlot(fit_pois, id=list(n=3), main="Influence Plot: Poisson GLM")
+```
+
+## Part 4: Ordinal and Multinomial Models
+
+---
+
+## Ordinal Response Setup
+
+Many **ordered categories** (e.g., symptom severity = Low < Med < High).
+
+We can use a **Proportional Odds Model (POM):**
+
+$$
+\log\!\left(\frac{P(Y\le k)}{P(Y>k)}\right)=\alpha_k - X^\top\beta
+$$
+
+for $k=1,\dots,K-1$.
+
+---
+
+## Simulate Ordinal Data
+
+```{r}
+#| echo: true
+#| output-location: slide
+set.seed(667)
+suppressPackageStartupMessages(library(MASS))
+N <- 250
+dat_ord <- tibble(
+  id = 1:N,
+  trt = rbinom(N,1,0.5),
+  time = rnorm(N)
+) %>%
+  mutate(
+    eta = -0.5 + 1.1*trt + 0.6*time,
+    p_low = plogis(1 - eta),
+    p_med = plogis(3 - eta) - plogis(1 - eta),
+    # --- FIX: Switched from purrr::map to a vectorized case_when ---
+    u = runif(N),
+    ord = case_when(
+      u < p_low ~ "L",
+      u < p_low + p_med ~ "M",
+      TRUE ~ "H"
+    ),
+    trt = factor(trt, labels=c("Ctl","Tx")),
+    ord = factor(ord, ordered=TRUE, levels=c("L","M","H"))
+  )
+head(dat_ord)
+```
+
+---
+
+## Fit Ordinal Logistic Model
+
+```{r}
+#| echo: true
+#| output-location: slide
+suppressPackageStartupMessages(library(MASS))
+fit_polr <- polr(ord ~ trt * time, data=dat_ord, Hess=TRUE)
+summary(fit_polr)
+```
+
+---
+
+
+## What the Coefficients Mean
+
+- This models the **log-odds of being in lower categories** (≤ k) versus higher (> k).  
+- Because of the **minus sign**, the direction is inverted:
+
+| Sign of $\beta_j$ | Interpretation | Effect |
+|------------------:|:---------------|:--------|
+| $\beta_j > 0$ | Decreases odds of being in lower categories | Increases odds of higher outcome |
+| $\beta_j < 0$ | Increases odds of being in lower categories | Decreases odds of higher outcome |
+
+---
+
+## Odds Ratio Interpretation
+
+- Exponentiate to obtain odds ratios:
+  $$
+  \text{OR}_j = e^{\beta_j}
+  $$
+- $\text{OR} > 1$: greater odds of being in **higher** categories  
+- $\text{OR} < 1$: greater odds of being in **lower** categories
+
+---
+
+## Example
+
+If $\hat\beta_{\text{Tx}} = 0.8$, then $\text{OR} = e^{0.8} = 2.23$:
+
+> “Subjects in the Treatment group have **2.23 times the odds of being in a higher outcome category**  
+> (e.g., Moderate or High rather than Low) compared with Control.”
+
+---
+
+## Conceptual Summary
+
+- Positive β → shifts distribution toward **higher** categories  
+- Negative β → shifts distribution toward **lower** categories  
+- One β applies across all cutpoints (the **proportional odds assumption**)
+
+---
+
+## Illustration with Predicted Probabilities
+
+```{r}
+#| echo: true
+#| output-location: slide
+newdata_ord <- expand.grid(trt=c("Ctl","Tx"), time=0)
+preds_ord <- predict(fit_polr, newdata=newdata_ord, type="probs")
+preds_tab <- cbind(newdata_ord, preds_ord)
+preds_tab
+```
+
+---
+
+## Interpreting the Table
+
+- Treatment (`Tx`) should have:
+  - Lower $P(\text{Low})$
+  - Higher $P(\text{High})$
+- Confirms that **positive β shifts mass upward** to higher outcome levels.
+
+---
+
+## Multinomial Regression (Nominal Categories)
+
+```{r}
+#| echo: true
+#| output-location: slide
+suppressPackageStartupMessages(library(nnet))
+fit_multi <- multinom(ord ~ trt * time, data=dat_ord, trace=FALSE)
+summary(fit_multi)
+```
+
+---
+
+## Comparing Ordinal vs Multinomial
+
+| Model | Assumes Order? | Shared $\beta$ Across Levels? | Parameters | Interpretation |
+|-------|----------------|-------------------------------|-------------|----------------|
+| Ordinal (POM) | Yes | Yes | Parsimonious | Easier to interpret |
+| Multinomial | No | No | Larger | Flexible but harder to interpret |
+
+---
+
+## Visualize Predicted Probabilities
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+library(tidyr)
+newo <- expand.grid(trt=c("Ctl","Tx"), time=seq(-2,2,length=100))
+preds <- predict(fit_polr, newdata=newo, type="probs")
+pred_df <- cbind(newo, preds) %>%
+  pivot_longer(cols=c(L,M,H), names_to="level", values_to="prob")
+ggplot(pred_df, aes(time, prob, color=level)) +
+  geom_line(linewidth=1) +
+  facet_wrap(~trt) +
+  labs(title="Predicted Category Probabilities",
+       y="Probability") +
+  theme_minimal()
+```
+
+---
+
+## Model Fit & Diagnostics Summary
+
+| Distribution | Link | Common Checks | Tools |
+|---------------|------|----------------|--------|
+| Binomial | logit | Deviance residuals, ROC | residuals(), pROC |
+| Poisson | log | Overdispersion, Pearson residuals | glm(), plot() |
+| Ordinal | logit (cum.) | Parallel lines | Empirical logits |
+| Multinomial | logit | Fit vs. AIC | summary(), predict() |
+
+---
+## Part 5: GLM Diagnostics and Extensions
+
+---
+
+## Why Diagnostics Matter in GLMs
+
+- Check that the **link function** captures the relationship correctly  
+- Assess **mean–variance** consistency  
+- Detect **outliers or influential points** - Identify **overdispersion or zero inflation** 
+- Validate **goodness-of-fit**
+
+---
+
+## Deviance and Pearson Residuals
+
+For GLMs:
+- **Deviance residuals:** based on model log-likelihood  
+- **Pearson residuals:** scaled by estimated variance  
+
+$$
+r_i^{(P)} = \frac{y_i - \hat\mu_i}{\sqrt{\hat V(\hat\mu_i)}}, \quad
+r_i^{(D)} = \text{sign}(y_i - \hat\mu_i)\sqrt{2\left[l(y_i) - l(\hat\mu_i)\right]}
+$$
+
+---
+
+## Example: Residual Plots (Poisson)
+
+```{r}
+#| echo: true
+#| output-location: slide
+r_df <- tibble(
+  fitted = fitted(fit_pois),
+  dev = residuals(fit_pois, type="deviance"),
+  pear = residuals(fit_pois, type="pearson")
+)
+
+ggplot(r_df, aes(fitted, dev)) +
+  geom_point(alpha=.6) +
+  geom_hline(yintercept=0, lty=2) +
+  labs(title="Deviance Residuals vs Fitted (Poisson)") +
+  theme_bw()
+```
+
+---
+
+## Assessing Model Fit with Deviance
+
+- **Residual deviance:** measures fit relative to saturated model  
+- Compare models via *likelihood ratio test*:
+  $$
+  D = 2(\ell_{\text{full}} - \ell_{\text{reduced}}) \sim \chi^2_{df}
+  $$
+- For nested models, smaller deviance = better fit.
+
+---
+
+## Influence and Leverage
+
+- *Leverage:* influence of each observation on fitted value  
+- *Cook’s Distance:* combines residual + leverage  
+- Tools:
+  ```r
+  influence.measures(fit_logit)
+  plot(hatvalues(fit_pois))
+  ```
+
+---
+
+## Choosing the Link Function
+
+| Link | Interpretation | Common Uses |
+|-------|----------------|--------------|
+| Identity | direct mean | Normal |
+| Logit | odds | Binary |
+| Log | rate | Count |
+| Probit | latent normal | Binary/Ordinal |
+| Complementary log-log | rare events | Survival-type data |
+
+---
+
+## Zero-Inflated and Hurdle Models
+
+Sometimes counts have *too many zeros*.  
+Two-part model:  
+1. Binary (zero vs non-zero)  
+2. Count (conditional on >0)     
+
+Implemented via `pscl::zeroinfl()`.
+
+---
+
+## Part 6: Extensions & Advanced Topics
+
+---
+
+## Quasi-Likelihood and Robust SEs
+
+- For correlated or misspecified models, robust (“sandwich”) SEs give valid inference.
+- In R:
+  ```r
+  library(sandwich)
+  coeftest(fit_pois, vcov = sandwich)
+  ```
+
+---
+
+## GEE Connection (Preview)
+
+GLMs assume independence, but in longitudinal data we relax this using **GEEs** (next lecture).
+
+$$
+\text{Var}(Y_i) = A_i^{1/2} R(\alpha) A_i^{1/2}
+$$
+
+Provides **robust inference** even if correlation model is wrong.
+
+---
+
+## Model Selection and AIC
+
+Use **Akaike Information Criterion** for comparing models:
+$$
+AIC = -2\ell + 2p
+$$
+Smaller AIC → better tradeoff between fit and complexity.
+
+---
+
+## Goodness-of-Fit Tests
+
+For binomial data:  
+- Hosmer–Lemeshow test    
+- Group predicted probabilities and compare observed vs expected  
+
+```{r}
+#| echo: true
+#| output-location: slide
+library(ResourceSelection)
+hoslem.test(dat$y_bin, fitted(fit_logit))
+```
+
+---
+
+## Predicted vs Observed (Visual Check)
+
+```{r}
+#| echo: true
+#| output-location: slide
+pred_df <- tibble(obs = dat$y_bin, pred = fitted(fit_logit))
+ggplot(pred_df, aes(pred, obs)) +
+  geom_jitter(height=.05, width=0) +
+  geom_smooth(method="loess", se=FALSE, color="blue") +
+  labs(title="Observed vs Predicted (Logistic)",
+       y="Observed", x="Predicted Probability") +
+  theme_minimal()
+```
+
+---
+
+## Common Pitfalls
+
+- Misinterpreting coefficients (odds ≠ probabilities)  
+- Ignoring overdispersion  
+- Using log link with zero/negative values  
+- Failing to assess model fit visually  
+- Confusing nested vs non-nested model comparison
+
+---
+
+## Further Reading
+
+- Fitzmaurice, Laird, & Ware (2011), *Applied Longitudinal Analysis*, Ch. 11  
+- Dobson & Barnett (2018), *An Introduction to Generalized Linear Models*  
+- Agresti (2015), *Foundations of Linear and Generalized Linear Models*  
+
+---
+
+## End of Lecture
+
+**Next Lecture:**  
+Generalized Estimating Equations (Chapter 12)
+## GLM Summary: Key Takeaways
+
+- GLMs extend linear models via link + variance structure  
+- Binary, count, and ordinal responses handled in one framework  
+- Diagnostics focus on:
+  - Link adequacy
+  - Variance consistency
+  - Outliers/influence
+- Overdispersion and zero-inflation require alternative models
+
+---
+
+## Part 7: Appendices (Advanced)
+
+---
+
+## Appendix A: IRLS Algorithm Details
+
+GLM estimation uses **Iteratively Reweighted Least Squares (IRLS)**:
+
+$$
+\beta^{(t+1)} = (X^\top W^{(t)} X)^{-1} X^\top W^{(t)} z^{(t)}
+$$
+
+where
+
+$$
+z^{(t)} = \eta^{(t)} + (y - \mu^{(t)}) \frac{d\eta}{d\mu}
+$$
+
+and weights $W^{(t)} = \text{diag}\!\left[\left(\frac{d\mu}{d\eta}\right)^2 / V(\mu)\right]$.
+
+---
+
+## Appendix B: Score Function and Fisher Information
+
+For canonical links:
+
+$$
+U(\beta) = \sum_i X_i (Y_i - \mu_i)
+$$
+
+$$
+I(\beta) = \sum_i X_i X_i^\top \frac{1}{\text{Var}(Y_i)}
+$$
+
+Used for standard errors and likelihood inference.
+
+---
+
+## Appendix C: Exponential Family Examples
+
+| Distribution | $a(\phi)$ | $b(\theta)$ | $c(y,\phi)$ |
+|---------------|------------|--------------|--------------|
+| Normal | $\sigma^2$ | $\theta^2/2$ | $-y^2/(2\sigma^2) - (1/2)\log(2\pi\sigma^2)$ |
+| Binomial | 1 | $\log(1+e^\theta)$ | $\log\binom{n}{y}$ |
+| Poisson | 1 | $e^\theta$ | $-\log(y!)$ |
+
+---
+
+
+ 

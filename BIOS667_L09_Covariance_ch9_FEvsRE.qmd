@@ -1,0 +1,512 @@
+---
+title: "BIOS 667: Fixed Effects vs Random Effects Models"
+subtitle: "Applied Longitudinal Analysis — Ch 9"
+author: "Naim Rashid, PhD  |  UNC Biostatistics"
+format:
+  revealjs:
+    theme: [default]
+    footer: BIOS 667 · UNC Gillings — Lecture 8 (Ch.8)
+    slide-number: true
+    hash: true
+    toc: false
+    code-overflow: wrap
+    code-line-numbers: false
+    math: mathjax
+    incremental: true
+    embed-resources: true
+    chalkboard: false
+    css: "unc-gillings.css"
+    scrollable: true
+execute:
+  warning: false
+  message: false
+---
+ 
+
+## Goals
+
+- Distinguish **Fixed Effects (FE)** vs **Random Effects (RE)**
+- Understand assumptions behind each
+- See when FE ≠ RE (endogeneity of unit effects)
+- Fit, visualize, and **test with Hausman** (_correctly_ with `plm`)
+- Practice interpretation & pitfalls
+
+---
+
+## Setup (packages)
+
+```{r}
+#| echo: true
+set.seed(667)
+library(plm)        # FE/RE models for panels
+library(nlme)       # lme (for comparison only)
+library(ggplot2)    # plots
+library(dplyr)      # data wrangling
+library(lmtest)     # tests including phtest()
+library(sandwich)   # robust VCs
+```
+
+---
+
+## Balanced panel simulation (high-level)
+
+We will simulate **balanced** data with:
+
+- `n = 100` subjects, `T = 6` time points
+
+- Unit effect $\alpha_i \sim N(0,1)$
+
+- Option to induce **corr** between $x_{it}$ and $\alpha_i$
+
+- Outcome: $y_{it} = 2 + \beta x_{it} + \alpha_i + \varepsilon_{it}$ (baseline)
+
+- We’ll also show a **moderate violation** via $x\text{–}\alpha$ correlation
+
+---
+
+## Data generator
+
+```{r}
+#| echo: true
+#| output-location: slide
+gen_panel <- function(n = 100, T = 6, beta = 1, rho_xa = 0) {
+  alpha <- rnorm(n, 0, 1)
+  df <- expand.grid(id = 1:n, time = 1:T) |>
+    arrange(id, time) |>
+    mutate(
+      a = rep(alpha, each = T),
+      # x, with optional correlation to alpha (rho_xa)
+      x = rnorm(n*T, 0, 1) + rho_xa * a,
+      # baseline DGP: no interaction, homoskedastic noise
+      y = 2 + beta * x + a + rnorm(n*T, 0, 1)
+    )
+  df
+}
+```
+
+---
+
+## Two scenarios we'll compare
+
+- **Scenario A (RE ok):** `rho_xa = 0` → $x \perp \alpha_i$ (RE unbiased)
+- **Scenario B (RE biased):** `rho_xa = 0.5` → $x$ correlated with $\alpha_i$
+
+We’ll fit FE + RE and apply **Hausman test** (FE vs RE) using **two `plm` models**.
+
+---
+
+## Scenario A: simulate & peek
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+dat_A <- gen_panel(rho_xa = 0)
+dplyr::glimpse(dat_A)
+```
+
+---
+
+## Fit FE and RE (Scenario A)
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+# FE (within) model
+fe_A <- plm(y ~ x, data = dat_A, index = c("id","time"), model = "within")
+
+# RE (random effects) model **using plm** (for Hausman compatibility)
+re_A <- plm(y ~ x, data = dat_A, index = c("id","time"),
+            model = "random", effect = "individual", random.method = "swar")
+
+# (Optional) lme for comparison only (do NOT pass to phtest)
+lme_A <- nlme::lme(y ~ x, random = ~ 1 | id, data = dat_A)
+```
+
+---
+
+## Coefficients (Scenario A)
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+data.frame(
+  model   = c("FE (plm within)", "RE (plm random)", "RE (nlme lme)"),
+  beta_x  = c(coef(fe_A), coef(re_A)["x"], fixef(lme_A)["x"])
+)
+```
+
+---
+
+## Hausman (Scenario A): classical
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+haus_A <- phtest(fe_A, re_A)
+haus_A
+```
+
+- Expect **fail to reject** (RE ≈ FE) because $x \perp \alpha_i$.
+
+---
+
+## Hausman (Scenario A): robust
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+haus_A_rob <- phtest(
+  fe_A, re_A,
+  vcov = function(x) vcovHC(x, method = "arellano", type = "HC0", cluster = "group")
+)
+haus_A_rob
+```
+
+- Robust version often similar conclusion here.
+
+---
+
+## Visual: sample subjects (Scenario A)
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+set.seed(667)
+samp_ids <- sample(unique(dat_A$id), 12)
+ggplot(dat_A |> filter(id %in% samp_ids),
+       aes(x = x, y = y, group = id)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.5) +
+  labs(title = "Scenario A: Within-subject patterns", x = "x", y = "y") +
+  theme_minimal()
+```
+
+---
+
+## Scenario B: simulate & peek
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+dat_B <- gen_panel(rho_xa = 0.5)
+dplyr::glimpse(dat_B)
+```
+
+- $x$ now **correlated** with $\alpha_i$ → RE **biased**.
+
+---
+
+## Fit FE and RE (Scenario B)
+
+```{r}
+#| echo: true
+#| output-location: slide
+fe_B <- plm(y ~ x, data = dat_B, index = c("id","time"), model = "within")
+
+re_B <- plm(y ~ x, data = dat_B, index = c("id","time"),
+            model = "random", effect = "individual", random.method = "swar")
+
+lme_B <- nlme::lme(y ~ x, random = ~ 1 | id, data = dat_B)
+```
+
+---
+
+## Coefficients (Scenario B)
+
+```{r}
+#| echo: true
+#| output-location: slide
+data.frame(
+  model  = c("FE (plm within)", "RE (plm random)", "RE (nlme lme)"),
+  beta_x = c(coef(fe_B), coef(re_B)["x"], fixef(lme_B)["x"])
+)
+```
+
+- Expect **RE** shifted from FE when $x$–$\alpha$ correlation exists.
+
+---
+
+## Hausman (Scenario B): classical
+
+```{r}
+#| echo: true
+#| output-location: slide
+haus_B <- phtest(fe_B, re_B)
+haus_B
+```
+
+- Expect **reject** (FE ≠ RE) → RE inconsistent.
+
+---
+
+## Hausman (Scenario B): robust
+
+```{r}
+#| echo: true
+#| output-location: slide
+haus_B_rob <- phtest(
+  fe_B, re_B,
+  vcov = function(x) vcovHC(x, method = "arellano", type = "HC0", cluster = "group")
+)
+haus_B_rob
+```
+
+- Robust check typically agrees.
+
+---
+
+## Visual: sample subjects (Scenario B)
+
+```{r}
+#| echo: true
+#| output-location: slide
+set.seed(667)
+samp_ids_B <- sample(unique(dat_B$id), 12)
+ggplot(dat_B |> filter(id %in% samp_ids_B),
+       aes(x = x, y = y, group = id)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.5) +
+  labs(title = "Scenario B: Within-subject patterns (x correlated with α)", x = "x", y = "y") +
+  theme_minimal()
+```
+
+---
+
+## FE model: intuition
+
+- FE **demeans**: regress $(y_{it} - \bar y_i)$ on $(x_{it} - \bar x_i)$
+- Removes **all time-invariant** confounding, including $\alpha_i$
+- Identifies effect from **within-unit** variation over time
+
+---
+
+## RE model: intuition
+
+- Treats $\alpha_i \sim \mathcal{N}(0, \sigma_\alpha^2)$ and **independent** of $x_{it}$
+- Pooled “GLS-like” efficiency gain if assumption holds
+- If $\operatorname{Cov}(x_{it},\alpha_i)\neq 0$ → **bias**
+
+---
+
+## When to prefer FE?
+
+- Concern about **endogeneity** (unobserved, time-invariant confounders)
+- Primary interest: **within-unit** causal effect
+- Many units (large $n$), moderate $T$
+
+---
+
+## When to prefer RE?
+
+- Believe $x \perp \alpha_i$ (design, randomization, or strong subject-matter case)
+- Want to estimate **between** + **within** effects efficiently
+- Need predictions for random effects (BLUPs), mixed-model framework
+
+---
+
+## FE vs RE: Bias–Variance trade-off
+
+- FE: **robust** to time-invariant confounding; can have **larger SEs**
+- RE: **efficient** if valid; **biased** if $x$–$\alpha$ correlated
+- Hausman test helps adjudicate
+
+---
+
+## FE with time-varying confounders?
+
+- FE only removes **time-invariant** confounding
+- Time-varying confounders must be **measured and adjusted**
+- Consider **Mundlak** or correlated random effects approach
+
+---
+
+##  Correlated RE idea
+
+- Add unit means $\bar x_i$ as covariate in RE:
+  - $y_{it} = \beta_w(x_{it}-\bar x_i) + \beta_b \bar x_i + \alpha_i + \varepsilon_{it}$
+- Allows $\alpha_i$ to correlate with $\bar x_i$ → recovers FE-like robustness
+
+---
+
+## Implementation (Scenario B)
+
+```{r}
+#| echo: true
+#| output-location: slide
+dat_B2 <- dat_B |>
+  group_by(id) |>
+  mutate(x_bar = mean(x), x_w = x - x_bar) |>
+  ungroup()
+
+mundlak_B <- plm(y ~ x_w + x_bar, data = dat_B2,
+                 index = c("id","time"), model = "random",
+                 effect = "individual", random.method = "swar")
+summary(mundlak_B)
+```
+
+- Compare $\hat\beta_w$ to FE slope.
+
+---
+
+## Compare FE vs Mundlak within-effect
+
+```{r}
+#| echo: true
+#| output-location: slide
+data.frame(
+  model   = c("FE (within)", "Mundlak (within part)"),
+  beta_w  = c(coef(fe_B)["x"], coef(mundlak_B)["x_w"])
+)
+```
+
+- Typically **close** if Mundlak is specified correctly.
+
+---
+
+## Add random slopes (mixed model view)
+
+- Mixed models (e.g., `lme4`, `nlme`) can add **random slopes**
+- But **Hausman** in this lecture relies on **two `plm` models**
+- Use `lme`/`lmer` for **estimation/prediction**, not for `phtest()`
+
+---
+
+## FE with unit & time effects
+
+- Add common **time fixed effects** to soak up shared shocks:
+  - `plm(y ~ x + factor(time), model="within")`
+- Or use two-way FE (`effect="twoways"`)
+
+---
+
+## Two-way FE example (Scenario B)
+
+```{r}
+#| echo: true
+#| output-location: slide
+fe_tw_B <- plm(y ~ x + factor(time),
+               data = dat_B, index = c("id","time"),
+               model = "within")
+summary(fe_tw_B)
+```
+
+---
+
+## Visual: FE vs RE fitted lines
+
+```{r}
+#| echo: true
+#| output-location: slide
+# quick overlay of fitted y-hat vs x (pooled depiction)
+pred_A <- dat_A |>
+  mutate(yhat_fe = as.numeric(fitted(fe_A)),
+         yhat_re = as.numeric(fitted(re_A)))
+
+ggplot(pred_A, aes(x = x, y = y)) +
+  geom_point(alpha = 0.15) +
+  geom_smooth(aes(y = yhat_fe), method = "lm", se = FALSE, linewidth = 0.7) +
+  geom_smooth(aes(y = yhat_re), method = "lm", se = FALSE, linewidth = 0.7, linetype = 2) +
+  labs(title = "Scenario A: FE (solid) vs RE (dashed)", x = "x", y = "y or ŷ") +
+  theme_minimal()
+```
+
+---
+
+## Visual: FE vs RE (biased case)
+
+```{r}
+#| echo: true
+#| output-location: slide
+pred_B <- dat_B |>
+  mutate(yhat_fe = as.numeric(fitted(fe_B)),
+         yhat_re = as.numeric(fitted(re_B)))
+
+ggplot(pred_B, aes(x = x, y = y)) +
+  geom_point(alpha = 0.15) +
+  geom_smooth(aes(y = yhat_fe), method = "lm", se = FALSE, linewidth = 0.7) +
+  geom_smooth(aes(y = yhat_re), method = "lm", se = FALSE, linewidth = 0.7, linetype = 2) +
+  labs(title = "Scenario B: FE (solid) vs RE (dashed) diverge", x = "x", y = "y or ŷ") +
+  theme_minimal()
+```
+
+---
+
+## Interpreting the Hausman output
+
+- **Null**: RE is consistent & efficient (FE and RE estimates “same”)
+- **Reject**: RE inconsistent → prefer FE (or correlated RE / Mundlak)
+- Use **robust** version when heteroskedasticity/cluster worries
+
+---
+
+## What about small T, large n?
+
+- FE relies on **within** variation; if minimal, SEs inflate
+- RE gains **efficiency** if assumptions hold
+- With small T, **bias** from endogeneity can be persistent
+
+---
+
+
+## Checklist before choosing RE
+
+- Any reason $x$ relates to subject-specific propensity ($\alpha_i$)?
+- Was $x$ randomized at unit level?
+- Can you justify **$x \perp \alpha_i$** with subject-matter knowledge?
+- If unsure → **FE** or **Mundlak**.
+
+---
+
+## Reporting recommendations
+
+- Report **FE** primary if endogeneity plausible
+- Add **RE** for efficiency check; report **Hausman test**
+- If using correlated RE (Mundlak), report both **within** and **between** effects
+
+---
+
+## Common pitfalls
+
+- Passing `lme` object into `phtest()` (must be `plm` vs `plm`)
+- Forgetting **clustered/robust** SEs when needed
+- Misinterpreting FE coefficients as **between-unit** effects (they’re within)
+
+---
+
+## Minimal code template (copy/paste) **(fixed: creates `dat`)**
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+set.seed(667)
+dat <- gen_panel(n = 120, T = 6, beta = 1, rho_xa = 0.3)  
+
+# Fit FE/RE for Hausman (both plm)
+fe <- plm(y ~ x, data = dat, index = c("id","time"), model = "within")
+re <- plm(y ~ x, data = dat, index = c("id","time"),
+          model = "random", effect = "individual", random.method = "swar")
+
+# Classical & robust Hausman
+phtest(fe, re)
+phtest(fe, re,
+       vcov = function(z) vcovHC(z, method = "arellano", type = "HC0", cluster = "group"))
+```
+
+
+---
+
+
+## Key takeaways
+
+- **FE** protects against time-invariant omitted variables
+- **RE** is efficient if $x \perp \alpha_i$; else **biased**
+- **Hausman** (FE vs RE) requires **two `plm` models**
+- **Mundlak**: a pragmatic correlated-RE compromise

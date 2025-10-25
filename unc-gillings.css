@@ -1,0 +1,15 @@
+
+/* UNC Gillings minimal theme for revealjs */
+:root { --unc-blue: #4B9CD3; --unc-dark:#13294B; --text:#1f2937; }
+.reveal .slides { color: var(--text); }
+.reveal .slide-number { background: var(--unc-dark); color: white;bottom: 20px !important;}
+.callout { border-left: 4px solid var(--unc-blue); background: #eef6fc; padding: 0.75rem; border-radius: 0.25rem; }
+.small { font-size: 0.9rem; }
+.scroll { max-height: 72vh; overflow-y: auto; }
+.reveal .footer > * {
+position: absolute; bottom:0; width:100%; background-color: var(--unc-blue); color: #0b2239; font-size: 1.0rem; padding: 6px 12px; 
+}
+
+code.sourceCode {
+  font-size: 0.8em;
+}

@@ -1,0 +1,116 @@
+---
+title: "HW1"
+format: pdf
+editor: visual
+---
+
+# Instructions
+
+Please compute the following questions to the best of your ability. Be thorough in explaining your reasoning on how you arrived at your answers, and present your results in a manner that would make it easy for a statistician colleague to follow. Do not copy and paste raw output from R, and use properly formatted tables, informative and labeled figures, and well defined notation where applicable. Explain and justify any assumptions you make. You may use AI to assist you in answering the following questions. AI is used, provide the AI tool that was used, the prompt, and the output from the prompt. You do not need to provide additional code or output.
+
+# Question 1
+
+Read the study and data description in problem 5.1 from Chapter 5 of the textbook. The two groups will be identified by $i = 1$ for placebo and $i = 2$ for high dose. The repeated measures will be identifed by $j = 1,\ldots, 5$. The obsevation times (0, 6, 12, 20, 24 months) will be denoted $t_{ij}$ . The cell means in the $2 \times 5$ layout will be denoted $\eta_{ij}$. The data is provided in \texttt{cholesterol.dat}.
+
+Use REML and Wald tests whenever possible and valid. Assume a common (for both groups) unstructured matrix for the covariance of the response vector. For hypothesis testing, describe your method, give the value of the test statistic, the degrees of freedom (if applicable) and the p-value.
+
+There are some missing outcomes in this problem which, depending on the reason for missingness, may lead to biased estimation. **Ignore that aspect** in this problem; missing data will be discussed in more detail later in this class.
+
+### (a)
+
+Summarize the dataset using tables and figures that respect the study design.\
+- Show both overall trends and group-specific patterns.\
+- Comment on what these patterns suggest about cholesterol changes over time.\
+- Discuss how these summaries might influence model choice downstream.
+
+### (b)
+
+The previous statistician fit the two-way ANOVA model $\eta_{ij} = \mu + \alpha_i + \beta_j + \gamma_{ij}$,\
+assuming correlation for repeated measures, as well as the constraints $\alpha_1 = \beta_1 = \gamma_{1j} = \gamma_{i1} = 0$.
+
+-   Explain in your own words why such constraints are necessary, and how one may fit this model. This can be done either through the use of dummy variables or through modification of how one may normally use existing functions to analyze this type of data.\
+-   Identify which parameters represent treatment effects over time (call this vector $\delta$).\
+-   Provide estimates and standard errors for $\delta$.\
+-   Comment on how these estimates would be interpreted in the context of cholesterol reduction.
+
+### (c)
+
+Test $H_0 : \delta = 0$ vs. $H_a : \delta \neq 0$.\
+- Report the test statistic, degrees of freedom (if applicable), and p-value.\
+- Explain in plain language what this result tells us about treatment effect over time.
+
+### (d)
+
+Modify the model by assuming both groups have the same baseline mean.\
+- Explain how this constraint changes interpretation of the model.\
+- Provide estimates and standard errors of $\delta$.\
+- Test $H_0 : \delta = 0$ vs. $H_a : \delta \neq 0$.\
+- Discuss how results compare to part (b).
+
+### (e)
+
+Let $D_k$ be the $4 \times 1$ vector of changes from baseline for subject $k$. Denote the corresponding cell means as $\psi_{ij}$.
+
+Fit the two-way ANOVA model $\psi_{ij} = \mu + \alpha_i + \beta_j + \gamma_{ij}$ with the same constraints as before.
+
+-   Identify which parameters represent treatment effects over time (call this $\lambda$).\
+-   Provide estimates and standard errors for $\lambda$.\
+-   Reflect: how does focusing on changes from baseline alter interpretation compared to part (b)?
+
+### (f)
+
+Test $H_0 : \lambda = 0$ vs. $H_a : \lambda \neq 0$.\
+- Compare results with part (b).\
+- Which formulation (original outcomes vs. changes from baseline) do you think better addresses the study’s scientific question? Why?
+
+### (g)
+
+Add baseline response (centered at 230) as a covariate. Call the new parameter vector $\lambda^*$.\
+- Provide parameter and standard error estimates for $\lambda^*$.\
+- Discuss whether adding this covariate changes your interpretation of treatment effects.
+
+### (h)
+
+Using the model from part (g), test $H_0 : \lambda^* = 0$ vs. $H_a : \lambda^* \neq 0$ with a Wald test.\
+- Comment on the strengths and limitations of the Wald approach here.
+
+### (i)
+
+Test the same hypothesis with a likelihood ratio test.\
+- Compare the result to part (h).\
+- Discuss situations in which the LRT might be preferred over the Wald test.
+
+------------------------------------------------------------------------
+
+### (j)
+
+What assumptions would guarantee that $\lambda^* = 0$, and therefore that adjusting for baseline still yields a valid estimate of $\lambda$?\
+- Be explicit about why these assumptions matter.\
+- Reflect on whether such assumptions are plausible in this study context.
+
+# Grading Rubric
+
+This rubric guides how your work will be evaluated. Use it as a checklist while writing your answers.
+
+| Category | Points | What’s Expected of You |
+|-----------------|-----------------|---------------------------------------|
+| Interpretation & Reasoning | 0–5 | Go beyond numbers. Explain what results mean in the cholesterol/time study context. State and justify assumptions. Show reasoning clearly. |
+| Analysis & Setup | 0–3 | Choose the correct model/test, provide estimates and test results (no raw output). Even if your numbers are slightly off, clear setup and attempt earn credit. |
+| Clarity & Presentation | 0–2 | Organize your work professionally. Use tables and labeled figures. Use notation consistently. Do not paste unformatted R output. |
+
+## What Strong Work Looks Like
+
+-   Explains results in plain language (e.g., “the treatment appears to lower cholesterol more quickly after 12 months”).\
+-   Includes assumptions (e.g., “we assume equal covariance across groups”).\
+-   Presents results in clean tables/figures.\
+-   Connects results back to the scientific question (cholesterol and treatment).
+
+------------------------------------------------------------------------
+
+## AI Use Policy
+
+-   You may use AI tools, but you must disclose:
+    1.  The tool and the exact prompt you used.\
+    2.  The output you received.\
+    3.  What you checked, corrected, or changed.\
+-   Full credit requires your own interpretation and reflection. Submissions with AI output but no interpretation will lose points.

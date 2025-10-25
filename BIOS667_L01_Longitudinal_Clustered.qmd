@@ -1,0 +1,632 @@
+---
+title: "BIOS 667 — Lecture 1: Longitudinal & Clustered Data (Ch. 1+2)"
+subtitle: "Fitzmaurice, Laird & Ware (2011) — Applied Longitudinal Data Analysis"
+author: "Naim Rashid"
+format:
+  revealjs:
+    theme: [default]
+    footer: BIOS 667 · UNC Gillings — Lecture 1 (Ch.1)
+    slide-number: true
+    hash: true
+    toc: false
+    code-overflow: wrap
+    code-line-numbers: false
+    math: mathjax
+    incremental: true
+    embed-resources: false
+    chalkboard: true
+    css: "unc-gillings.css"
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+
+```{r setup-ala, include=FALSE}
+# Mirror key datasets locally (first render will download); then all slides run offline.
+ala_base <- "https://content.sph.harvard.edu/fitzmaur/ala2e"
+datasets <- data.frame(
+  name = c("fev1", "dental", "exercise", "epilepsy"),
+  file = c("fev1.txt", "dental.txt", "exercise.txt", "epilepsy.txt"),
+  stringsAsFactors = FALSE
+)
+dir.create("data", showWarnings = FALSE)
+for (k in seq_len(nrow(datasets))) {
+  dest <- file.path("data", datasets$file[k])
+  if (!file.exists(dest)) {
+    src <- paste0(ala_base, "/", datasets$file[k])
+    try(utils::download.file(src, destfile = dest, mode = "wb", quiet = TRUE), silent = TRUE)
+  }
+}
+# Helper to load a dataset robustly
+load_ala <- function(fname) {
+  p <- file.path("data", fname)
+  if (!file.exists(p)) return(NULL)
+  df <- try(utils::read.table(p, header=TRUE), silent=TRUE)
+  if (inherits(df, "try-error")) return(NULL)
+  df
+}
+```
+
+# Lecture Goals
+
+## Today, You Will learn how to
+- Recognize the **structure** of longitudinal/clustered data.
+- Explain **why correlation matters** for inference.
+- Preview general model **notation** for longtiudinal/clustered data 
+
+---
+
+# What is Longitudinal Data Analysis?
+
+## What is Longitudinal Data Analysis? 
+
+- **Definition**: Statistical methods for analyzing data where *repeated measurements* are collected from the same subjects over time.  
+- **Key Goal**: Understand both **within-person changes** (trajectories) and **between-person differences** in those changes.  
+ 
+---
+
+## Example: Six Cities Study of Air Pollution and Health 
+
+::: {style="font-size: 0.8em;"}
+
+- Example from the book:  `data/fev1.txt`
+- Tracked annual lung function growth (FEV1) in children through repeated spirometry and questionnaires.
+- The dataset is a subset of 300 girls from Topeka, Kansas, with 1–12 repeated measurements of FEV1, height, and age.
+
+:::
+
+---
+
+## Illustration
+
+```{r fig.align="center"}
+#| echo: true
+#| output-location: slide
+
+# Try real FEV1 data; fallback to synthetic if not available
+library(ggplot2)
+fev <- read.table("data/fev1.txt", header=TRUE)
+
+# Pick a subset of children (for clarity)
+set.seed(123)
+ids <- sample(unique(fev$id), 15)
+fev_sub <- fev[fev$id %in% ids, ]
+
+# Plot lung function (FEV) over age for each child
+ggplot(fev_sub, aes(x=age, y=logfev1, group=id, color=factor(id))) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  theme(legend.position="right") +
+  labs(title="Repeated Measures of Lung Function (FEV)",
+       x="Age (years)", y="FEV (log liters)")
+```
+
+---
+
+## Illustration
+
+- Each child’s repeated trajectory is correlated — they don’t bounce around randomly.
+- Cross-sectional data would show only one dot (timepoint of data) for each child.
+
+---
+
+##  How does this differ in other way from Cross-Sectional analyses (BIOS 663)?
+
+::: {style="font-size: 0.6em;"}
+
+| **Feature**        | **Cross-Sectional**                           | **Longitudinal**                                   |
+|---------------------|-----------------------------------------------|---------------------------------------------------|
+| **Design**         | One measurement per subject                   | Repeated measurements per subject over time        |
+| **Focus**          | Population snapshot at a single point in time | Trajectories, rates of change, within-person trend |
+| **Correlation**    | Observations independent                      | Within-subject correlation present                 |
+| **Missingness**    | Usually one-time nonresponse                  | Dropout, intermittent missingness, often informative |
+| **Efficiency**     | Less efficient for dynamic questions          | More efficient: each subject serves as their own control |
+| **Applications**   | Prevalence studies, cross-sectional surveys   | Growth curves, disease progression, treatment effects |
+
+:::
+
+---
+
+## What is Longitudinal Data Analysis? Summary:
+
+::: {style="font-size: 0.8em;"}
+
+- **Core Features**:
+  - Accounts for *correlation* between repeated measures on the same subject  
+  - Handles *time-varying covariates* and outcomes  
+  - Can address *dropout* and *missingness* common in longitudinal studies
+  
+- **Applications**:  
+  - Clinical trials (e.g., treatment response over time)  
+  - Epidemiology (e.g., disease progression)  
+  - Public health and social sciences (e.g., growth and aging studies)
+
+:::
+
+---
+
+# Why longitudinal designs?
+
+## What are the Pros and Cons of Longitudinal Designs?
+
+::: {style="font-size: 0.8em;"}
+
+- **Advantages**  
+  - Improved efficiency: each subject serves as their own control (paired comparisons).  
+  - Clarifies temporal ordering and **rates of change**.  
+  - Adjusting for baseline improves precision (**1‑df summaries** later).
+
+- **Tradeoffs**  
+  - **Missingness** and **dropout** (often MAR/MNAR).  
+  - **Irregular visit times** and **informative observation times**.  
+  - **Complex dependence** requiring careful covariance modeling (Ch.7–8).
+
+:::
+
+---
+
+## Why Does Correlation Matter so much here?
+
+- Violating independence assumption can:  
+  - **Bias standard errors** (leading to invalid inference)  
+  - **Overstate significance** of predictors  
+- Proper models must:  
+  - Account for **within-subject correlation**  
+  - Distinguish **within- vs between-subject effects**
+
+---
+
+## Visualization: Correlation Over Time
+
+```{r}
+library(ggplot2)
+set.seed(1)
+df <- data.frame(
+  id = rep(1:5, each=6),
+  time = rep(1:6, 5),
+  y = rep(rnorm(5, 10, 2), each=6) + rnorm(30, 0, 1)
+)
+
+ggplot(df, aes(x=time, y=y, group=id, color=factor(id))) +
+  geom_line() + geom_point() +
+  labs(title="Subject-level correlation in repeated measures",
+       x="Time", y="Outcome") +
+  theme_minimal()
+```
+
+## Scientific questions that we can answer in longitudinal analysis
+
+::: {style="font-size: 0.8em;"}
+
+- **Describe change:** trajectories over time (mean profiles, individual variation).
+- **Explain change:** how covariates (baseline & time‑varying) shift trajectories.
+- **Predict:** subject‑level or population predictions at future times.
+- **Compare groups:** treatment or exposure effects over time (with baseline alignment).
+- **Account for dependence:** valid SEs and tests in the presence of correlation.
+
+:::
+
+---
+
+## Longitudinal designs vs clustered (not always time) 
+
+::: {style="font-size: 0.8em;"}
+
+- **Longitudinal:** repeated measures on the *same* subject over time.  
+  - Examples: FEV1 across visits; HbA1c quarterly; depression scores monthly.
+- **Clustered (non‑temporal):** multiple units within a higher‑level unit.  
+  - Examples: students in classrooms; patients within clinics; litters within dams.
+- Techniques overlap (correlation within units), but **time structure** adds constraints and opportunities.
+
+:::
+
+---
+
+# Common Notation and Data Structures for Longitudinal Data
+
+## Notation for Longitudinal Data 
+
+- Suppose we have **$n$ subjects**  
+- Subject *$i$* has **$n_i$ repeated measures**  
+- Measurement at time *$t_{ij}$* is $Y_{ij}, \quad i = 1,\dots,n, \quad j = 1,\dots,n_i$
+- Example: blood pressure measured at multiple visits for each patient
+
+---
+
+## Notation for Longitudinal Data  
+
+- Each subject has a **vector of responses**: $\mathbf{Y}_i = (Y_{i1}, Y_{i2}, \dots, Y_{in_i})^\top$
+- Dimension: $n_i \times 1$ 
+- Represents the full outcome trajectory for subject *$i$*
+
+---
+
+## Notation for Longitudinal Data
+
+- The **covariate information** for subject *$i$* at visit *$j$*:  $\mathbf{x}_{ij} = (x_{ij1}, x_{ij2}, \dots, x_{ijp})^\top$
+- Often includes:
+  - Subject characteristics (sex, age, baseline disease)  
+  - Time-dependent covariates (treatment at time *$j$*)  
+
+---
+
+## An Aside: Baseline vs time‑varying covariates 
+
+- **Baseline** (time‑invariant): sex, treatment assignment, genotype.  
+- **Time‑varying:** weight, blood pressure, adherence.  
+- Interpretation changes when covariate varies over time (within vs between effects, Ch.9).  
+- Keep track of **when** covariates are measured relative to outcomes.
+
+---
+
+## Notation for Longitudinal Data
+
+- Stack covariates for subject *$i$* into a **design matrix**:
+
+$$\mathbf{X}_i = 
+\begin{bmatrix}
+\mathbf{x}_{i1}^\top \\
+\mathbf{x}_{i2}^\top \\
+\vdots \\
+\mathbf{x}_{in_i}^\top
+\end{bmatrix}$$
+
+- Dimension: ($n_i \times p$)  
+
+---
+
+## Notation for Longitudinal Data  
+
+- Each subject has a **vector of responses**: $\mathbf{Y}_i = (Y_{i1}, Y_{i2}, \dots, Y_{in_i})^\top$
+- Dimension: $n_i \times 1$ 
+- Represents the full outcome trajectory for subject *$i$*
+
+---
+
+## Putting it all togeter
+
+- The **basic data structure** for longitudinal analysis:  
+
+
+$$(\mathbf{Y}_i, \mathbf{X}_i), \quad i=1,\dots,n$$
+
+- Key features:
+  - Multiple responses per subject  
+  - Within-subject correlation  
+  - Unequal number of measurements possible ($n_i$ varies across subjects)
+  
+---
+
+
+## Notation for Clustered Data  
+
+- Similar to before, except $n$ pertains to clusters (classrooms, hospitals, sites)  
+- Cluster *$i$* has **$n_i$** subjects that belong to that cluster  
+- Measurement $Y_{ij}, \quad i = 1,\dots,n, \quad j = 1,\dots,n_i$
+- Example: $n=10$ hospitals in a study, with $n_i$ patients enrolled per hospital
+
+
+---
+
+##  Wide vs. Long Format
+
+**Wide format (each row = subject)**
+
+| id | sex | bp_t1 | bp_t2 | bp_t3 |
+|----|-----|-------|-------|-------|
+| 1  | 0   | 120   | 122   | 125   |
+| 2  | 1   | 135   | 137   | 140   |
+
+---
+
+**Long format (each row = observation)**
+
+| id | sex | time | bp  |
+|----|-----|------|-----|
+| 1  | 0   | 0    | 120 |
+| 1  | 0   | 1    | 122 |
+| 1  | 0   | 2    | 125 |
+| 2  | 1   | 0    | 135 |
+| 2  | 1   | 1    | 137 |
+| 2  | 1   | 2    | 140 |
+
+---
+
+### R Code: Reshaping Wide to Long
+
+```{r}
+#| echo: true
+#| output-location: slide
+#| 
+library(tidyr)
+library(dplyr)
+
+# toy wide dataset
+df_wide <- tibble(
+  id = c(1, 2),
+  sex = c(0, 1),
+  bp_t1 = c(120, 135),
+  bp_t2 = c(122, 137),
+  bp_t3 = c(125, 140)
+)
+
+# reshape to long
+df_long <- df_wide %>%
+  pivot_longer(
+    cols = starts_with("bp"),
+    names_to = "time",
+    values_to = "bp"
+  ) %>%
+  mutate(time = recode(time,
+                       "bp_t1" = 0,
+                       "bp_t2" = 1,
+                       "bp_t3" = 2))
+
+df_long
+```
+
+---
+
+# Sources of Correlation in Longitudinal Data
+
+## Sources of Correlation in Longitudinal Data
+
+- **Recap: why correlation matters**:  
+  - Repeated measures on the same subject are *not independent*  
+  - Ignoring correlation → biased SEs, incorrect inference  
+- We need to identify *sources* of correlation to model them properly
+
+---
+
+## Source 1: Between-Individual Heterogeneity
+
+::: {style="font-size: 0.7em;"}
+- **Definition**: Natural differences in individuals’ *baseline* propensity to respond.  
+  - Some are consistently *high responders* (e.g., higher general blood pressure)  
+  - Others are *low* or *medium responders* (e.g., lower general blood pressure) 
+- **Consequence**:  
+  - Repeated measures within an individual tend to be **more similar** than measures across different individuals  
+  - Positive correlation arises because the same underlying propensity is carried across time  
+- **Trajectory differences**:  
+  - Individuals may respond differently to interventions *over time*  
+  - Some show greater-than-average gains, others below average  
+
+:::
+
+---
+
+## Modeling and Implications
+::: {style="font-size: 0.7em;"}
+- **Statistical approach**:  
+  - Introduce **random effects** (random intercepts/slopes) to capture heterogeneity  
+  - Accounts for differences in baseline level *and* in individual trajectories  
+
+- **Key insight**:  
+  - Between-individual variation is a **major source of correlation** in longitudinal data  
+  - Must be separated from within-individual variability (biological fluctuations + measurement error)  
+
+- **Takeaway**:  
+  - Ignoring heterogeneity biases inference  
+  - Random-effects models (detailed in Ch. 8) provide a principled way to model it
+
+:::
+
+---
+
+## Source 2: Within-Individual Biological Variation
+
+::: {style="font-size: 0.8em;"}
+
+- **Definition**: Natural short-term fluctuations in health outcomes within the same person.  
+  - Examples: blood pressure, pain, cholesterol, heart rate  
+  - Driven by *biological* rhythms (circadian, monthly, seasonal) or *external* factors (diet, infection, temperature, light)  
+  
+- **Characteristics**:  
+  - Responses vary around an individual’s *homeostatic set point*  
+  - Successive deviations are **not independent**  
+  - Close-in-time measurements are more **highly correlated** than distant ones
+
+:::
+
+---
+
+## Implications for Longitudinal Analysis
+
+- **Serial correlation**:  
+  - Measurements closer in time → stronger correlation  
+  - Correlation decreases as time lag increases  
+
+- **Takeaway**:  
+  - Within-individual biological variation produces **time-dependent correlation structures**  
+  - Must be accounted for in both **mean models** and **covariance structures** (see Ch. 7)
+
+---
+
+## Serial Correlation from Within-Individual Variation
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+set.seed(667)
+
+# Simulate AR(1) process for 1 individual (blood pressure example)
+n <- 50
+time <- 1:n
+rho <- 0.8   # correlation between successive measurements
+bp <- arima.sim(model = list(ar = rho), n = n, sd = 5) + 120
+
+# Plot
+plot(time, bp, type = "l", lwd = 2,
+     xlab = "Time (arbitrary units)", ylab = "Blood Pressure",
+     main = "Simulated Serial Correlation in Repeated Measures")
+points(time, bp, pch = 16, col = "blue")
+
+```
+
+---
+
+## Serial Correlation from Within-Individual Variation
+
+```{r}
+#| echo: true
+#| output-location: slide
+ 
+# Show autocorrelation function
+acf(bp, main = "Autocorrelation of Repeated Measures")
+```
+
+---
+
+## Source 3: Measurement Error in Longitudinal Data
+
+::: {style="font-size: 0.8em;"}
+- A key source of **within-subject variability**  
+- Distinct from inherent biological variability  
+  - Biological variability = natural fluctuations  
+  - Measurement error = imprecision of instrument/procedure  
+- Even simultaneous replicate measures may not agree due to error  
+- Example: biomarker in blood divided into two sub-samples → differing results
+
+:::
+
+---
+
+## Quantifying Measurement Error
+
+::: {style="font-size: 0.8em;"}
+
+- **Reliability coefficient** = proportion of variability due to “true” scores  
+  - Reliability = Var(True) / Var(Total)  
+- High reliability → measurements reflect true variation  
+- Low reliability → large portion of variation is error  
+- Examples:
+  - Height ≈ 0.98  
+  - LDL cholesterol ≈ 0.85  
+  - Self-reported well-being < 0.5
+
+::: 
+
+---
+
+## Impact of Reliability
+
+- Measurement error **attenuates correlation** among repeated measures  
+- Correlation is reduced by a factor of reliability  
+  - Example: reliability = 0.8 → observed correlations shrunk by 20%  
+- Greater error variance → weaker observed correlations
+
+---
+
+## Consequences of Measurement Error
+
+- Weakens observed correlations  
+- Limits the maximum possible correlation (never approaches 1)  
+- Can obscure true within-individual biological variation  
+- Makes it harder to distinguish between biological variability and noise  
+- Often must be lumped with biological variation into a single error term
+
+---
+
+## Visualizing Attenuation: Correlation Shrinks with Lower Reliability
+
+```{r}
+set.seed(123)
+
+# --- simulate a "true" longitudinal signal + biological variation ---
+n <- 300
+time <- 1:5
+true_response <- matrix(rep(seq(10, 14, length.out = 5), n), nrow = n, byrow = TRUE)
+bio_var <- matrix(rnorm(n*length(time), 0, 1), n, length(time))
+true_data <- true_response + bio_var  # error-free measurements (apart from biology)
+
+# --- add measurement error with target reliability ---
+add_me <- function(data, reliability) {
+  v_true <- var(as.vector(data))
+  v_err  <- v_true * (1 - reliability) / reliability
+  data + matrix(rnorm(length(data), 0, sqrt(v_err)), nrow = n)
+}
+
+rels <- c(0.98, 0.85, 0.50)
+dat_list <- lapply(rels, function(r) add_me(true_data, r))
+names(dat_list) <- paste0("Reliability = ", rels)
+
+# build plotting data frame (time 1 vs time 5)
+mk <- function(M, lab) data.frame(t1 = M[,1], t5 = M[,5], Reliability = lab)
+df_plot <- do.call(rbind, Map(mk, dat_list, names(dat_list)))
+
+# compute correlations to annotate facets
+cors <- aggregate(cbind(t1, t5) ~ Reliability, df_plot, function(z) 0)
+cors$rho <- sapply(split(df_plot, df_plot$Reliability),
+                   function(d) cor(d$t1, d$t5))
+
+# ---- plot: facet by reliability ----
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+  library(ggplot2)
+  ggplot(df_plot, aes(t1, t5)) +
+    geom_point(alpha = 0.35, size = 1.2) +
+    geom_smooth(method = "lm", se = FALSE, size = 0.8) +
+    facet_wrap(~ Reliability, nrow = 1) +
+    labs(x = "Measurement at Time 1", y = "Measurement at Time 5",
+         title = "Attenuation of Correlation with Lower Reliability") +
+    theme_minimal(base_size = 12)
+} else {
+  # base R fallback (no ggplot2)
+  op <- par(mfrow = c(1, 3), mar = c(4,4,2,1))
+  for (lab in names(dat_list)) {
+    M <- dat_list[[lab]]
+    plot(M[,1], M[,5], pch = 19, col = rgb(0,0,0,0.35),
+         xlab = "Time 1", ylab = "Time 5", main = lab)
+    abline(lm(M[,5] ~ M[,1]), lwd = 2)
+  }
+  par(op)
+}
+```
+
+As reliability drops (0.98 → 0.85 → 0.50), the cloud widens and the T1–T5 correlation weakens—exactly the attenuation effect we discuss on the previous slides.
+
+---
+
+## Summary: Three Sources of Variability
+
+::: {style="font-size: 0.8em;"}
+
+- **Between-individual heterogeneity** → induces positive correlation  
+- **Within-individual biological variability** → correlation decreases with time lag  
+- **Measurement error** → prevents correlations from reaching 1  
+- All three sources combine to determine the observed correlation structure  
+- Practical challenge: often impossible to fully separate error vs. biological variation
+
+:::
+
+---
+
+# Still Here?  Wrapping up
+
+## Take-Home Messages
+
+- Correlation in longitudinal data arises from:  
+  1. **Subject-specific effects**  
+  2. **Serial correlation**  
+  3. **Shared measurement error**  
+- Consequences: biased SEs, wrong inference, inefficient estimation  
+- Proper modeling of covariance is as important as modeling the mean
+
+---
+
+## Canonical resources (bookmark these)
+- Author slides (Fitzmaurice et al.): content.sph.harvard.edu/fitzmaur/ala2e/bio226-bw-slides-2007.pdf  
+- Book datasets (.txt): content.sph.harvard.edu/fitzmaur/ala2e/datasets.html  
+- Sample R commands: content.sph.harvard.edu/fitzmaur/ala2e/SampleR.html
+
+---
+
+## For Next Time
+
+- Please Read Chapter 3 of ALA
+
+---
+

@@ -1,0 +1,377 @@
+---
+title: "BIOS 667 — Lecture 12: Marginal Models (Ch. 12)"
+subtitle: "Fitzmaurice, Laird & Ware — Applied Longitudinal Data Analysis"
+author: "Naim Rashid, PhD | UNC Biostatistics"
+format:
+  revealjs:
+    theme: [default]
+    footer: BIOS 667 · UNC Gillings — Lecture 12 (Ch.12)
+    slide-number: true
+    hash: true
+    toc: false
+    code-overflow: wrap
+    code-line-numbers: false
+    math: mathjax
+    incremental: true
+    embed-resources: true
+    chalkboard: false
+    css: "unc-gillings.css"
+    scrollable: true
+execute:
+  warning: false
+  message: false
+---
+
+## Lecture Objectives
+
+- Why standard **GLMs** fail for longitudinal data  
+- What **marginal models** are and when to use them  
+- How **marginal vs mixed vs transition** models differ in interpretation  
+- The **three-part** marginal model: mean, variance, association  
+- Why we estimate with **GEE** (preview; Ch. 13)
+
+---
+
+## Roadmap
+
+1) Why GLMs fail for correlated data  
+2) Marginal model: **mean | variance | association**  
+3) Four worked examples (continuous, count, binary, ordinal)  
+4) Why full likelihood is hard for discrete data  
+5) GEE preview & practical decisions
+
+---
+
+## Motivation
+
+- Repeated measures within subject are **correlated** → naïve GLM underestimates SEs  
+- For **discrete** data, how we model correlation changes meaning of $\beta$  
+
+**Model families:**  
+- **Marginal:** population mean; **working** association  
+- **Mixed-effects:** subject-specific mean (random effects)  
+- **Transition:** mean conditional on past outcomes
+
+---
+
+## Targets of Inference
+
+| Family | Target | $\beta$ Interpretation |
+|---|---|---|
+| **Marginal** | Population mean | Population-average log-odds / log-rate / mean diff |
+| **Mixed** | Individual trajectory | Subject-specific (given $b_i$) |
+| **Transition** | Conditional on past $Y$ | Effect given previous outcomes |
+
+---
+
+## Marginal Model = Mean • Variance • Association
+
+**Mean:** $E(Y_{ij}|X_{ij})=\mu_{ij}$,  $g(\mu_{ij})=X_{ij}^\top\beta$  
+**Variance:** $\operatorname{Var}(Y_{ij}|X_{ij})=\phi\,v(\mu_{ij})$  
+**Association:** within-subject dependence $R(\alpha)$ (exchangeable, AR(1), etc.)  
+
+Changing $R(\alpha)$ affects **precision**, not **interpretation** of $\beta$.
+
+---
+
+## 12.2 Notation & Data Structure
+
+- $N$ subjects; subject $i$ has $n_i$ measurements at times $t_{ij}$  
+- Stack responses: $Y_i=(Y_{i1},\dots,Y_{in_i})^\top$  
+- Across-subject independence; within-subject dependence
+
+---
+
+## Covariates
+
+- $X_{ij}=(x_{ij1},\dots,x_{ijp})^\top$; stack to $X_i$ ($n_i\times p$)  
+- **Time-invariant:** treatment, sex (between-subject)  
+- **Time-varying:** age, exposure (within-subject)
+
+---
+
+## Discrete Outcomes: Correlation Is Tricky (I)
+
+Feasible $\rho$ depends on marginal means.  
+If $E(Y_1)=0.2$, $E(Y_2)=0.8$ → $\rho_{12}\le0.25$.  
+→ Binary correlation constrained by means.
+
+---
+
+## Discrete Outcomes: Correlation Is Tricky (II)
+
+Odds ratios are more natural for binary pairs:  
+
+$$
+\theta=\log\frac{P_{11}P_{00}}{P_{10}P_{01}}
+$$
+
+→ The joint distribution isn’t defined by means + correlations alone.
+
+---
+
+## Master Unbalanced Dataset 
+
+```{r}
+#| echo: true
+#| output-location: slide
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(tibble)
+  library(ggplot2)
+  library(nlme)
+  library(MASS)
+  library(broom)
+})
+
+set.seed(667)
+N <- 120
+n_i <- sample(3:6, N, replace = TRUE)
+id <- rep(1:N, times = n_i)
+time <- unlist(lapply(n_i, function(n) 0:(n-1)))
+trt <- rep(rbinom(N, 1, 0.5), times = n_i)
+b0 <- rep(rnorm(N, 0, 1.2), times = n_i)
+b1 <- rep(rnorm(N, 0, 0.4), times = n_i)
+eps <- rnorm(length(id), 0, 1)
+y <- 10 + 0.6*time + 1.0*trt + 0.5*(trt*time) + b0 + b1*time + eps
+lp_bin <- -1 + 0.25*time + 0.7*trt
+p_bin <- plogis(lp_bin)
+y_bin <- rbinom(length(id), 1, p_bin)
+mu_cnt <- exp(1.2 + 0.15*time + 0.3*trt)
+y_count <- rpois(length(id), mu_cnt)
+cuts <- quantile(y, probs = c(.25,.5,.75))
+ordinal_y <- cut(y, breaks = c(-Inf, cuts, Inf),
+                 labels = c("L","M","H","VH"), ordered_result = TRUE)
+dat <- tibble(
+  id = factor(id),
+  time = as.integer(time),
+  trt = factor(trt, levels = c(0,1), labels = c("Ctl","Tx")),
+  y = y,
+  y_bin = as.integer(y_bin),
+  y_count = as.integer(y_count),
+  ordinal_y = ordered(ordinal_y)
+)
+```
+
+---
+
+## Visualizing Imbalance
+
+```{r}
+#| echo: true
+ggplot(dat, aes(time, y, group=id, color=trt)) +
+  geom_line(alpha=.15) +
+  stat_summary(fun=mean, geom="line", linewidth=1.2) +
+  labs(title="Unbalanced Trajectories by Treatment",
+       y="Continuous outcome y") +
+  theme_minimal()
+```
+
+---
+
+## Implicit Mean Assumption
+
+$$
+E(Y_{ij}\mid X_{i1},\dots,X_{in_i})=E(Y_{ij}\mid X_{ij})
+$$
+
+OK for design-fixed covariates; fails if future $X$ responds to past $Y$ (e.g., feedback processes).
+
+---
+
+## Summary 
+
+- Marginal models = GLM-like mean + variance + working correlation  
+- $\beta$ is **population-average**  
+- $R(\alpha)$ improves **efficiency** only  
+- Discrete data require **GEE** (next lecture)
+
+---
+
+## 12.3 Examples: Continuous, Count, Binary, Ordinal
+
+Each:  
+1. Model specification (mean, variance, association)  
+2. Example fit  
+3. Visualization
+
+---
+
+## Continuous Outcome — Spec
+
+$E(Y_{ij}|X_{ij})=\mu_{ij}=X_{ij}^\top\beta$  
+$\operatorname{Var}(Y_{ij}|X_{ij})=\phi$  
+$\operatorname{Corr}(Y_{ij},Y_{ik})=\alpha^{|j-k|}$ (AR(1))
+
+→ $\beta$: population-average mean difference/slope.
+
+---
+
+## Continuous Outcome — Fit
+
+```{r}
+#| echo: true
+#| output-location: slide
+#| 
+dat_cont <- dat |> dplyr::select(id, time, trt, y)
+fit_cont <- gls(y ~ time*trt, data=dat_cont,
+                correlation=corAR1(form=~time|id),
+                method="REML")
+coef(summary(fit_cont))
+```
+
+---
+
+## Continuous Outcome — Plot
+
+```{r}
+#| echo: true
+#| output-location: slide
+ggplot(dat_cont, aes(time, y, color=trt)) +
+  stat_summary(fun=mean, geom="line", linewidth=1.3) +
+  labs(title="Continuous: Mean Trajectories by Treatment",
+       y="Mean(y)") +
+  theme_minimal()
+```
+
+---
+
+## Count Outcome — Spec
+
+$g(\mu_{ij})=\log(\mu_{ij})=X_{ij}^\top\beta$  
+$\operatorname{Var}(Y_{ij}|X_{ij})=\phi\,\mu_{ij}$  
+Association: working $R(\alpha)$  
+
+→ $\beta$: log rate ratios (population-average).
+
+---
+
+## Count Outcome — Fit + Overdispersion
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+dat_cnt <- dat |> dplyr::select(id, time, trt, y_count)
+fit_pois <- glm(y_count ~ time*trt, family=poisson(), data=dat_cnt)
+phi_hat <- sum(residuals(fit_pois, type="pearson")^2)/fit_pois$df.residual
+list(summary=summary(fit_pois)$coefficients, phi=phi_hat)
+```
+
+---
+
+## Count Outcome — Mean Counts Plot
+
+```{r}
+#| echo: true
+#| output-location: slide
+
+ggplot(dat_cnt, aes(time, y_count, color=trt)) +
+  stat_summary(fun=mean, geom="line", linewidth=1.2) +
+  labs(title="Count: Mean Counts by Time and Treatment",
+       y="Mean count") +
+  theme_minimal()
+```
+
+---
+
+## Binary Outcome — Spec
+
+$g(\mu_{ij})=\log\frac{\mu_{ij}}{1-\mu_{ij}}=X_{ij}^\top\beta$  
+$\operatorname{Var}(Y_{ij}|X_{ij})=\mu_{ij}(1-\mu_{ij})$  
+
+→ $\beta$: log-odds ratio (population-average).
+
+---
+
+## Binary Outcome — Fit + Predicted Curves
+
+```{r}
+#| echo: true
+#| output-location: slide
+dat_bin <- dat |> dplyr::select(id, time, trt, y_bin)
+fit_logit <- glm(y_bin ~ time*trt, family=binomial(), data=dat_bin)
+newdat <- expand.grid(trt=levels(dat_bin$trt),
+                      time=seq(min(dat_bin$time), max(dat_bin$time), length.out=100))
+newdat$pred <- predict(fit_logit, newdata=newdat, type="response")
+ggplot(newdat, aes(time, pred, color=trt)) +
+  geom_line(linewidth=1.2) +
+  labs(title="Binary: Fitted Probabilities by Treatment", y="Pr(Y=1)") +
+  theme_minimal()
+```
+
+---
+
+## Ordinal Outcome — Spec (Proportional Odds)
+
+$\Pr(Y_{ij}\le k|X_{ij})=F_{ijk}$  
+$\log\frac{F_{ijk}}{1-F_{ijk}}=\alpha_k+X_{ij}^\top\beta$  
+
+→ $\beta$: log cumulative odds ratios (population-average).
+
+---
+
+## Ordinal Outcome — Fit
+
+```{r}
+#| echo: true
+#| output-location: slide
+dat_ord <- dat |> dplyr::select(id, time, trt, ordinal_y)
+fit_ord <- polr(ordinal_y ~ time*trt, data=dat_ord, Hess=TRUE)
+broom::tidy(fit_ord)
+```
+ 
+---
+
+## Working Correlation Teaser (GEE Preview)
+
+Same mean model, different $R(\alpha)$ → $\hat\beta$ stable, SEs differ.  
+Next: GEE estimation for population-average $\beta$ with robust SEs.
+
+---
+
+## Full Likelihood vs Marginal + GEE
+
+- **Full likelihood (discrete):** needs 2-, 3-, …-way associations → infeasible  
+- **Marginal + GEE:** specify mean, variance, working $R(\alpha)$; robust SEs; unbalanced OK  
+
+→ GEE wins for practicality and interpretability.
+
+---
+
+## Why Full Likelihood Is Hard
+
+```{r}
+#| echo: true
+#| output-location: slide
+needed_terms <- function(m) 2^m - m - 1
+dfc <- data.frame(m = 4:12,
+                  extra_assoc = sapply(4:12, needed_terms))
+ggplot(dfc, aes(m, extra_assoc)) +
+  geom_point() + geom_line() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(title="Explosion of Association Parameters",
+       x="Number of repeats (m)",
+       y="Parameters beyond means (2^m - m - 1)") +
+  theme_minimal()
+```
+
+---
+
+## Practical Decisions
+
+| Question Type | Best Model |
+|----------------|------------|
+| Population-average effects | Marginal (GEE) |
+| Subject-specific trajectories | Mixed effects |
+| Dependence on past $Y$ | Transition model |
+
+---
+
+## Key Takeaways
+
+- Marginal = **mean • variance • association**  
+- For discrete data, full joint models are intractable → use **GEE**  
+- $\beta$ = population-average effect, robust to $R(\alpha)$  
+- Next lecture: **GEE estimation**, working correlation, robust SEs

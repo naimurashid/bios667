@@ -1,0 +1,289 @@
+---
+title: "BIOS 667 — Homework 4"
+author: "REPLACE THIS STRING WITH THE LAST 5 DIGITS OF YOUR PID FOR ANONYMITY"
+format:
+  html:
+    number-sections: false
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+editor: visual
+---
+
+```{r}
+#| label: setup
+
+# Load required packages
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(lme4)      # for lmer/glmer
+  library(nlme)      # for lme
+  library(MASS)      # for polr, glm.nb
+  library(broom)     # for tidy() outputs
+  library(geepack)   # for GEE (if needed for comparison)
+})
+
+## IMPORTANT ####################################################
+seed <-   # set this equal to the last 5 PID digits of your PID
+#################################################################
+
+stopifnot(seed >= 10000 & seed <= 99999)
+set.seed(seed)
+
+# Set options for clean output
+options(contrasts = c("contr.treatment", "contr.poly"))
+knitr::opts_chunk$set(fig.width = 6, fig.height = 4, dpi = 120)
+```
+
+---
+
+## 0. Data Setup
+
+> Each student has a unique simulated dataset based on their PID seed.
+> The dataset includes continuous, binary, count, and ordinal outcomes.
+
+```{r}
+#| label: data-simulation
+
+message("Simulating dataset...")
+N <- 120; Tt <- 5
+id <- rep(1:N, each = Tt)
+time <- rep(0:(Tt-1), N)
+trt <- rep(rbinom(N, 1, 0.5), each = Tt)
+
+# Random intercepts/slopes
+b0 <- rep(rnorm(N, 0, 1.2), each = Tt)
+b1 <- rep(rnorm(N, 0, 0.4), each = Tt)
+
+# AR(1) errors
+rho <- 0.5; sd_eps <- 1.0
+eps <- unlist(lapply(1:N, function(i) {
+  as.numeric(arima.sim(list(ar = rho), n = Tt, sd = sd_eps))
+}))
+
+# Continuous response (with interaction)
+y <- 10 + 0.6*time + 1.0*trt + 0.5*trt*time + b0 + b1*time + eps
+
+# Binary outcome (main effects only for simplicity)
+lp_bin <- -1 + 0.2*time + 0.6*trt
+p_bin  <- plogis(lp_bin)
+y_bin  <- rbinom(N*Tt, 1, p_bin)
+
+# Count outcome (main effects only)
+mu_count <- exp(1.2 + 0.15*time + 0.25*trt)
+y_count  <- rpois(N*Tt, mu_count)
+
+# Ordinal outcome (derived from y, so it also has an interaction)
+cuts <- quantile(y, probs = c(.25, .5, .75))
+ordinal_y <- cut(y, breaks = c(-Inf, cuts, Inf),
+                 labels = c("L","M","H","VH"), ordered_result = TRUE)
+
+dat <- tibble(
+  id = factor(id),
+  time = as.integer(time),
+  trt = factor(trt, levels = c(0,1), labels = c("Ctl","Tx")),
+  y = y,
+  y_bin = as.integer(y_bin),
+  y_count = as.integer(round(y_count)),
+  ordinal_y = ordered(ordinal_y)
+)
+
+glimpse(dat)
+summary(dat[, c("y","y_bin","y_count","ordinal_y")])
+```
+
+---
+
+## 1) Conceptual Foundations (25 pts)
+
+### 1.1 Model Hierarchy (10 pts)
+
+**(WRITE):** Explain how OLS, LMM, and GLM differ in
+(a) their assumptions about the mean structure, (b) their assumptions about the variance/covariance, and (c) their overall distributional assumptions.
+
+> (Your answer should be 2–4 sentences per model, and you can use a small schematic if it helps clarify the differences).
+
+
+---
+
+### 1.2 Residuals & Diagnostics (10 pts)
+
+**(WRITE):** Contrast **marginal** and **conditional** residuals in the context of Linear Mixed-Effects Models. For what diagnostic purpose is each type of residual most appropriate? 
+
+---
+
+### 1.3 Link Functions (5 pts)
+
+**(WRITE):** Explain how the **identity**, **logit**, and **log** link functions change the interpretation of a non-intercept regression coefficient $\beta$. For each, complete the sentence: "A one-unit increase in predictor $X$ is associated with..."
+
+---
+
+## 2) Applied Modeling (55 pts)
+
+### 2.1 Linear Mixed Model (15 pts)
+
+**Prompt:** Fit a linear mixed-effects model for the continuous outcome `y`, including a random intercept and random slope for `time`. Your fixed effects should include `time`, `trt`, and their interaction.
+
+**Tasks:**
+1.  (CODE & WRITE) Fit the model using `nlme::lme()` and present the `summary()` output.
+2.  (WRITE) Interpret the fixed effect coefficient for the `time:trtTx` interaction.
+3.  (WRITE) Report the variance components. In your narrative, explain what the standard deviations of the random intercept and slope tell you about the between-subject heterogeneity in this dataset. Also, interpret the *sign and magnitude* of the correlation between the random effects.
+4.  (CODE & WRITE) Create diagnostic plots: (a) conditional residuals vs. fitted values, and (b) a QQ plot of the conditional residuals. Comment on whether the model assumptions appear to be met.
+5.  (CODE & WRITE) Create QQ plots for the random effects (intercepts and slopes). Do they appear normally distributed?
+
+```{r}
+#| label: lmm-fit
+
+
+# Fit model and print summary
+ 
+
+# report variance components
+ 
+```
+
+*Your interpretation of the interaction, variance components, and diagnostics goes here.*
+
+```{r}
+#| label: lmm-diagnostics
+
+
+# obtain conditional residuals and fitted values
+ 
+
+# plot conditional residuals vs fitted values
+ 
+
+# make qq plot for the conditional residuals
+ 
+
+# create qq plots for the random effects (intercepts, and also for slopes)
+ 
+```
+
+*Your comments on the diagnostic plots go here.*
+
+---
+
+### 2.2 Logistic GLM (Binary) (10 pts)
+
+Fit a logistic regression model for the binary outcome `y_bin`.
+
+**Tasks:**
+1.  (CODE & WRITE) Fit the model `y_bin ~ time * trt` and present the `summary()` output.
+2.  (WRITE) Interpret the odds ratio for the `trtTx` main effect. Be very specific about the *condition* under which this odds ratio applies (i.e., the value of the `time` variable).
+3.  (CODE & WRITE) Plot the deviance residuals vs. the fitted probabilities and comment on the plot.
+
+```{r}
+#| label: logit-fit
+
+
+# fit the model and print summary
+ 
+
+# Report the odds ratio based on the fitted model
+ 
+
+```
+
+*Your interpretation of the odds ratio goes here.*
+
+```{r}
+#| label: logit-diagnostics
+
+
+# plot the deviance residuals vs. the fitted probabilities
+ 
+```
+
+*Your comments on the residual plot go here.*
+
+---
+
+### 2.3 Poisson vs. Quasi-Poisson (10 pts)
+
+Model the count outcome `y_count` using both a Poisson and a Quasi-Poisson GLM.
+
+**Tasks:**
+1.  (CODE & WRITE) Fit both `y_count ~ time + trt` models and present the `tidy()` output for each.
+2.  (WRITE) Compare the coefficient estimates and standard errors between the two models.
+3.  (CODE & WRITE) Calculate and interpret the estimated dispersion parameter ($\hat\phi$) from the quasi-Poisson model. What does its value tell you about the appropriateness of the standard Poisson model?
+
+```{r}
+#| label: count-models
+
+
+# fit poisson model
+ 
+# fit quasi-poisson model
+ 
+# print output from tidy() on each model object
+ 
+
+# report the estimated dispersion parameter from the quasi-poisson model
+ 
+```
+
+*Your comparison of the coefficient estimates/SEs as well as the interpretation of the dispersion parameter go here.*
+
+---
+
+### 2.4 Ordinal Response (Proportional Odds) (10 pts)
+
+Fit a proportional odds logistic regression model for the `ordinal_y` outcome.
+
+**Tasks:**
+1.  (CODE & WRITE) Fit the model `ordinal_y ~ time * trt` using `MASS::polr()` and present the `summary()`.
+2.  (WRITE) Interpret the odds ratio for the `trtTx` treatment effect. Specifically, explain how treatment is associated with the odds of a subject being in a *lower vs. higher* category on the `ordinal_y` scale.
+3.  (WRITE) In your own words, what is the "proportional odds" assumption?
+4.  (CODE & WRITE) Create and interpret the empirical cumulative logit plot to visually check the proportional odds assumption for the `time` variable.
+
+```{r}
+#| label: ordinal-fit
+
+
+# fit the nodel and present the summary
+ 
+```
+
+*Your interpretation of the odds ratio goes here.*
+
+```{r}
+#| label: ordinal-diagnostics
+
+ 
+```
+
+*Your interpretation of the PO assumption goes here.*
+
+## 3) Peer Review (15 pts)
+
+After the HW has been turned in, review two classmates’ submissions (≈ 100 words each). You do not need to provide a numeric score, but instead provide comments that address:
+- Model specification accuracy  
+- Clarity of interpretation  
+- Diagnostic reasoning  
+- Organization and visuals
+
+You will be randomly assigned your peer assessments in Canvas.   Provide your comments in canvas as well as a brief overall summary sentence for each peer.  Please be thorough and constructive. 
+
+---
+
+## 4) Formatting & Reproducibility (5 pts)
+
+- Knit runs without error  
+- Figures / tables labeled and referenced  
+- Seed set at top  
+- File readable and organized  
+
+---
+
+## Reminders
+
+- `id` must be a factor  
+- `polr()` requires an ordered response  
+- Do not compare AIC for quasi-Poisson  
+- Logistic GLM requires a binary outcome  
+- Check overdispersion for counts  
+
+---

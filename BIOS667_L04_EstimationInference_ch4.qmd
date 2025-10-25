@@ -1,0 +1,627 @@
+---
+title: "BIOS 667 — Lecture 4: Overview of Linear Models for Longitudinal Data"
+subtitle: "Fitzmaurice, Laird & Ware (2011) — Applied Longitudinal Data Analysis"
+author: "Naim Rashid"
+format:
+  revealjs:
+    theme: [default]
+    footer: BIOS 667 · UNC Gillings — Lecture 3 (Ch.3)
+    slide-number: true
+    hash: true
+    toc: false
+    code-overflow: wrap
+    code-line-numbers: false
+    math: mathjax
+    incremental: true
+    embed-resources: true
+    chalkboard: false
+    css: "unc-gillings.css"
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+##  Introduction
+
+
+## Introduction
+::: {style="font-size: 0.8em;"}
+- Until now: models for longitudinal data were **conceptual** (mean + covariance).  
+- Starting here: focus on **estimation of unknown parameters**:
+  - Regression coefficients $\boldsymbol{\beta}$  
+  - Covariance parameters $\boldsymbol{\theta}$ (or equivalently $\Sigma_i$)  
+- Framework: conditional multivariate normal model
+
+$$
+\mathbb{E}(\mathbf{Y}_i \mid \mathbf{X}_i) = \mathbf{X}_i \boldsymbol{\beta}
+$$
+
+$$
+\text{Cov}(\mathbf{Y}_i \mid \mathbf{X}_i) = \Sigma_i = \Sigma_i(\boldsymbol{\theta})
+$$
+
+:::  
+---
+
+## Interpreting $\Sigma_i$
+::: {style="font-size: 0.8em;"}
+- $\Sigma_i$ encodes **within-subject covariance** of repeated measures  
+- Parameterized by a vector $\boldsymbol{\theta}$ of covariance parameters  
+- Dimension of $\boldsymbol{\theta}$ depends on the chosen structure:
+  - **Unstructured covariance (UN):**  
+    - All variances and pairwise covariances estimated  
+    - If $n_i = n$ balanced, then $q = n(n+1)/2$ parameters  
+  - **Structured covariance (e.g., compound symmetry):**  
+    - Only a few parameters (e.g., $q = 2$: one variance + one covariance) 
+    
+::: 
+---
+
+## Why This Matters
+
+::: {style="font-size: 0.8em;"}
+
+- Choice of covariance structure directly impacts:  
+  - **Efficiency** of $\hat{\beta}$ (are SEs valid/efficient?)  
+  - **Interpretability** of correlation patterns  
+  - **Feasibility** (number of parameters explodes under UN when $n$ large)  
+- Chapters 5–8 will:  
+  - Focus on **models for the mean and covariance**  
+  - Explore estimation under different covariance assumptions  
+  - Develop tools for inference when $\Sigma_i$ is known vs estimated  
+
+:::
+
+---
+
+## Why This Matters
+
+> **Question:**  
+> What might happen if we assume *compound symmetry* when the *true structure* is autoregressive (AR(1))?
+
+---
+
+## Example: Covariance Structures 
+::: {style="font-size: 0.8em;"}
+::: {.scroll}
+
+Let’s simulate data under **compound symmetry (CS)** vs **autoregressive AR(1)** to visualize how correlation affects repeated measures.
+
+```{r}
+#| echo: true
+
+set.seed(667)
+
+# Parameters
+n_subj <- 3
+n_time <- 5
+time <- 1:n_time
+
+# Compound symmetry covariance (rho constant)
+rho_cs <- 0.75
+Sigma_cs <- matrix(rho_cs, n_time, n_time)
+diag(Sigma_cs) <- 1
+
+# AR(1) covariance (rho decays with lag)
+rho_ar1 <- 0.75
+Sigma_ar1 <- rho_ar1 ^ abs(row(Sigma_cs) - col(Sigma_cs))
+
+# Indep covariance (rho is 0)
+rho_in <- 0
+Sigma_in <- matrix(rho_in, n_time, n_time)
+diag(Sigma_in) <- 1
+
+# Simulate data
+library(MASS)
+sim_cs  <- MASS::mvrnorm(n_subj, mu = rep(0, n_time), Sigma = Sigma_cs)
+sim_ar1 <- MASS::mvrnorm(n_subj, mu = rep(0, n_time), Sigma = Sigma_ar1)
+sim_in <- MASS::mvrnorm(n_subj, mu = rep(0, n_time), Sigma = Sigma_in)
+
+# Put in long format
+to_long <- function(mat, type){
+  data.frame(id = rep(1:nrow(mat), each = n_time),
+             time = rep(time, nrow(mat)),
+             y = as.vector(t(mat)),
+             cov_type = type)
+}
+df <- rbind(to_long(sim_cs,"CS"), to_long(sim_ar1,"AR1"), to_long(sim_in,"Indep"))
+```
+:::
+:::
+---
+
+## Visualization: CS vs AR(1)
+
+```{r}
+#| echo: true
+#| output-location: slide
+library(ggplot2)
+ggplot(df, aes(x = time, y = y, group = id, color = cov_type)) +
+  geom_line(alpha = 0.75) +
+  facet_wrap(~cov_type) +
+  labs(title = "Simulated Trajectories under CS vs AR(1) vs Identity Covariance",
+       x = "Time", y = "Response") +
+  theme_minimal()
+```
+
+---
+
+## Key Takeaways
+
+- **Compound symmetry:** correlation is constant across time → lines look “parallel”.  
+- **AR(1):** correlation decays with lag → trajectories diverge as time separation increases.  
+- This illustrates why choosing $\Sigma_i$ correctly matters:  
+  - If mis-specified, **SEs can be wrong**, inference misleading.  
+  - We will revisit this when fitting models in Chapter 7.
+
+---
+
+# Maximum Likelihood Estimation
+
+## Maximum Likelihood Estimation
+
+- **Goal:** estimate both regression coefficients $\boldsymbol{\beta}$ and covariance parameters $\boldsymbol{\theta}$  
+- Framework: multivariate normal model  
+- ML estimates are those that maximize the log-likelihood:
+
+$$
+\ell(\boldsymbol{\beta}, \boldsymbol{\theta}) = -\tfrac{1}{2} \sum_{i=1}^N 
+\Big[ \log |\Sigma_i| + (\mathbf{Y}_i - \mathbf{X}_i \boldsymbol{\beta})^\top \Sigma_i^{-1} (\mathbf{Y}_i - \mathbf{X}_i \boldsymbol{\beta}) \Big]
+$$
+
+---
+
+## Case 1: Independent Observations
+
+- If **responses are independent** (e.g., cross-sectional data):  
+  - $\Sigma_i = \sigma^2 I$  
+  - Log-likelihood simplifies to **OLS framework**  
+
+$$
+\hat{\boldsymbol{\beta}} = (X^\top X)^{-1} X^\top Y
+$$
+
+- Variance is scalar $\sigma^2$  
+- Interpretation: ML reduces to OLS under independence  
+
+---
+
+## Visualization: Independent Case
+
+```{r}
+set.seed(667)
+n <- 50; x <- rnorm(n); y <- 1 + 2*x + rnorm(n, sd=1)
+fit <- lm(y ~ x)
+plot(x, y, pch=19, col="steelblue")
+abline(fit, col="darkred", lwd=2)
+```
+
+- With independence: OLS line = ML estimate  
+- All observations contribute equally  
+
+---
+
+## Case 2: Non-Independent Observations
+
+- For **longitudinal data**: responses within subject $i$ are correlated  
+- $\Sigma_i$ not proportional to identity matrix  
+- Need to model covariance explicitly (e.g., CS, AR(1), UN)  
+- ML must **jointly estimate** $\boldsymbol{\beta}$ and $\boldsymbol{\theta}$  
+
+---
+
+## Implications of Non-Independence
+
+- If correlation ignored:  
+  - $\hat{\boldsymbol{\beta}}$ still unbiased (under correct mean model)  
+  - But **standard errors are wrong** → misleading inference  
+- Proper ML uses $\Sigma_i^{-1}$ weighting to account for correlation  
+
+---
+
+## Example: CS vs AR(1) in ML
+
+```{r}
+library(nlme)
+data(Orthodont, package="nlme")
+Orthodont = data.frame(Orthodont)
+
+# Fit ML with compound symmetry vs AR1
+fit_cs  <- gls(distance ~ age, correlation = corCompSymm(value = 0.5, form = ~1|Subject),data=Orthodont, method="ML")
+
+fit_ar1 <- gls(distance ~ age, correlation = corAR1(value = 0.5, form =~age|Subject),
+               data=Orthodont, method="ML")
+
+AIC(fit_cs, fit_ar1)
+```
+
+- Compare model fits: AR(1) often better when correlation decays with time  
+- Demonstrates sensitivity of ML to covariance choice  
+
+---
+
+## Why ML Matters
+
+- ML provides a unified framework for:  
+  - Estimating regression parameters  
+  - Estimating covariance structure  
+  - Testing competing models (via likelihood ratio tests, AIC, etc.)  
+
+- BUT: can be biased for variance components in small samples → motivates REML  
+
+---
+
+## Discussion Prompt
+
+> Suppose you analyze repeated measures with **independence assumed**, but the true covariance is AR(1).  
+>
+> - What happens to $\hat{\boldsymbol{\beta}}$?  
+> - What happens to its standard errors?  
+> - How might conclusions differ?
+
+---
+
+# Missing Data Mechanisms
+
+## Missing Data Mechanisms
+
+- Missing data is **ubiquitous** in longitudinal studies  
+- The mechanism driving missingness is critical to:  
+  - Validity of parameter estimates  
+  - Interpretation of results  
+- Rubin’s classification: **MCAR, MAR, MNAR**  
+- Core question: *Can we ignore the missingness mechanism?*
+
+---
+
+## MCAR — Missing Completely at Random
+::: {style="font-size: 0.8em;"}
+- Probability of missingness does **not depend on data**  
+  - Neither observed nor unobserved values  
+- Example: lab sample lost due to shipping error  
+- Implication: analyses on complete cases remain **unbiased**, but less efficient  
+
+$$
+P(R_i \mid Y_i, X_i) = P(R_i)
+$$
+
+> Rare in practice, but a useful baseline.
+
+:::
+---
+
+## MAR — Missing at Random
+
+- Probability of missingness depends only on **observed data**  
+- Example: dropout depends on age or baseline health status (observed)  
+- Implication: valid inference possible if model conditions on observed predictors  
+
+$$
+P(R_i \mid Y_i, X_i) = P(R_i \mid Y_{i,\text{obs}}, X_i)
+$$
+
+- Methods: likelihood-based, multiple imputation, IPW  
+ 
+
+---
+
+## MAR: Valid if Appropriately Modeled
+
+- **MAR ≠ automatically safe**  
+- Valid inference requires that the **variables driving missingness** are part of your analysis (or imputation) model.  
+- Otherwise: bias creeps in, even if the true mechanism is MAR.
+
+$$
+P(R_i \mid Y_i, X_i) = P(R_i \mid Y_{i,\text{obs}}, X_i)
+$$
+
+---
+
+## MAR Examples — Correct vs Incorrect
+::: {style="font-size: 0.8em;"}
+- **Correct modeling (valid):**  
+  - Dropout depends on **gender** (observed).  
+  - If gender is included as a covariate → estimates remain valid.  
+
+- **Incorrect modeling (biased):**  
+  - Dropout depends on **baseline depression score** (observed),  
+    but depression score is omitted from the model.  
+  - Inference now biased, even though the mechanism is technically MAR.  
+
+**Takeaway:**  
+> Always include predictors of missingness in your model (or imputation) if they’re observed.
+:::
+
+---
+
+## MNAR — Missing Not at Random
+::: {style="font-size: 0.8em;"}
+- Probability of missingness depends on **unobserved data**  
+- Example: patients with worsening symptoms more likely to drop out  
+- Implication: Ignorability fails; specialized models needed  
+  - Selection models  
+  - Pattern-mixture models  
+
+$$
+P(R_i \mid Y_i, X_i) = P(R_i \mid Y_{i,\text{mis}}, Y_{i,\text{obs}}, X_i)
+$$
+
+- Assumptions must be **explicit & untestable**
+:::
+---
+
+## Visual Illustration of Mechanisms
+
+```{r}
+#| echo: true
+#| output-location: slide
+library(ggplot2)
+set.seed(667)
+
+n <- 200
+x <- rnorm(n)
+y <- 0.5 + 1.2*x + rnorm(n)
+
+# Create missingness
+mar <- ifelse(x > 0.5, NA, y)      # MAR: depends on observed X
+mcar <- ifelse(runif(n) < 0.3, NA, y)  # MCAR
+mnar <- ifelse(y > 1, NA, y)       # MNAR: depends on actual values of Y itself, unobserved
+
+df <- data.frame(x, y, mcar, mar, mnar)
+df_long <- tidyr::pivot_longer(df, cols = c(y,mcar,mar,mnar),
+                               names_to="Type", values_to="Value")
+
+ggplot(df_long, aes(x, Value, color=Type)) +
+  geom_point(alpha=0.6) +
+  facet_wrap(~Type) +
+  theme_minimal() +
+  labs(title="Illustrating MCAR, MAR, and MNAR")
+```
+
+---
+
+## Consequences of Ignoring Mechanisms
+
+- **MCAR:** unbiased estimates but less power  
+- **MAR:** valid if appropriately modeled  
+- **MNAR:** bias if treated as MAR → biggest risk  
+- Incorrect assumption can change clinical conclusions!  
+
+---
+
+## Discussion Prompt
+
+> Suppose a trial of a new cancer therapy has 20% dropout:  
+> - Healthier patients drop due to travel burden  
+> - Sicker patients drop due to toxicity  
+>
+> - Which mechanism is most plausible?  
+> - How would this affect analysis?  
+
+---
+
+## Practical Takeaways
+
+- **Always ask**: Why is data missing?  
+- **Document** dropout patterns carefully  
+- **Perform sensitivity analyses** for MNAR scenarios  
+- In practice: start with MAR, but assess robustness  
+
+---
+
+# Statistical Inference
+
+## Statistical Inference
+
+- After estimation, we want to make **inferences** about:
+  - Regression coefficients $\boldsymbol{\beta}$
+  - Covariance parameters $\boldsymbol{\theta}$
+- Inference in longitudinal models differs from OLS because:
+  - Observations **within subject** are correlated
+  - Covariance structure must be modeled/estimated
+
+---
+
+## Standard OLS Inference
+
+- In cross-sectional linear regression:  
+  $$ \hat{\boldsymbol{\beta}} \sim N(\boldsymbol{\beta}, \sigma^2 (X^\top X)^{-1}) $$
+- Assumes:
+  - Independent, identically distributed errors
+  - Homoscedasticity
+- Test statistics (t, F) rely on independence assumption
+
+---
+
+## Inference in Longitudinal Data
+::: {style="font-size: 0.8em;"}
+- With correlated data:
+  - $$ \text{Var}(\hat{\boldsymbol{\beta}}) = \left( \sum_i X_i^\top \Sigma_i^{-1} X_i \right)^{-1} $$
+- **Key difference**: dependence on $\Sigma_i$  
+- Standard errors reflect both within- and between-subject variation  
+- If $\Sigma_i$ mis-specified → bias in standard errors, incorrect inference
+
+:::
+---
+
+## Likelihood Ratio Tests (LRT)
+
+- For testing hypotheses about parameters in **nested models**:
+  $$ \Lambda = -2(\ell_{\text{restricted}} - \ell_{\text{full}}) $$
+- Asymptotically $\chi^2$-distributed  
+- Used for:
+  - Testing fixed effects
+  - Comparing covariance structures
+- Requires ML estimation (not REML for fixed effects tests)
+
+---
+
+### Likelihood Ratio Test (LRT)
+
+- **Pros**: more robust than Wald when testing multiple parameters.  
+- **Cons**: requires *both* restricted and full model fits.  
+- **Best for** fixed-effects comparisons (→ use **ML**, not REML).
+
+## Wald Tests
+
+- Based on asymptotic normality of $\hat{\boldsymbol{\beta}}$:  
+  $$ W = (\hat{\boldsymbol{\beta}} - \beta_0)^\top \text{Var}(\hat{\boldsymbol{\beta}})^{-1} (\hat{\boldsymbol{\beta}} - \beta_0) $$
+- Flexible, can test single parameters or linear combinations
+- Easy: only requires the fitted model.
+- **Cons**: relies heavily on SE accuracy → sensitive to covariance misspecification.
+
+
+
+---
+
+### Score Test
+- Based on derivative of likelihood at restricted model.  
+- Requires only restricted fit.  
+- Often used for testing **variance components** (e.g., random effects).  
+- Less commonly applied in practice compared to LRT/Wald.
+
+---
+
+## Comparison of Inference Approaches
+::: {style="font-size: 0.8em;"}
+| Test | Requires full model? | Small-sample properties | Notes |
+|------|----------------------|-------------------------|-------|
+| LRT  | Yes                  | Better for fixed effects | Not valid under REML for fixed effects |
+| Wald | Yes                  | Sensitive to SE estimation | Flexible |
+| Score| No                   | Can be conservative      | Good for testing covariance terms |
+:::
+---
+
+
+# When to Use Which?
+
+- **Wald**: quick, single-parameter, exploratory.
+- **LRT**: nested models, multiple fixed effects, model selection.
+- **Score**: variance components, when full model fit is unstable.
+
+---
+
+# Satterthwaite df
+
+- In finite samples, $\chi^2$ and $t$ approximations may be too liberal.  
+- **Satterthwaite adjustment** rescales variance estimates to approximate correct df.  
+  - Common in mixed models (e.g., `lmerTest` in R).  
+  - Test statistic:  
+    $$
+    t = \frac{\hat{\beta}}{\text{SE}(\hat{\beta})}, \quad df \approx \frac{2 \cdot \text{SE}^4}{\text{Var}(\text{SE}^2)}
+    $$  
+- Produces **fractional degrees of freedom** → more accurate Type I error control.
+
+---
+
+## Summary 
+
+- **Wald**: convenient but SE-sensitive.  
+- **LRT**: preferred for nested model comparisons.  
+- **Score**: good for variance component testing.  
+- **Satterthwaite df**: critical for small-sample validity in mixed models.
+
+# Restricted Maximum Likelihood (REML)
+
+## Restricted Maximum Likelihood (REML)
+
+- Motivation: Estimating variance components by ML can be **biased**  
+  - Because ML does not account for loss of degrees of freedom from estimating $\boldsymbol{\beta}$  
+- REML modifies the likelihood to use **only error contrasts** of the data, eliminating $\boldsymbol{\beta}$
+
+---
+
+## Mathematical Definition of REML
+
+- Suppose $\mathbf{Y} \sim N(\mathbf{X}\boldsymbol{\beta}, \mathbf{V})$  
+- ML log-likelihood:  
+  $$
+  \ell(\boldsymbol{\beta}, \boldsymbol{\theta}) = -\tfrac{1}{2}\left\{\log|\mathbf{V}| + (\mathbf{Y}-\mathbf{X}\boldsymbol{\beta})^\top \mathbf{V}^{-1}(\mathbf{Y}-\mathbf{X}\boldsymbol{\beta}) \right\}
+  $$
+
+- REML log-likelihood: integrates out $\boldsymbol{\beta}$  
+  $$
+  \ell_R(\boldsymbol{\theta}) = -\tfrac{1}{2}\left\{ \log|\mathbf{V}| + \log|\mathbf{X}^\top \mathbf{V}^{-1}\mathbf{X}| + (\mathbf{Y}-\mathbf{X}\hat{\boldsymbol{\beta}})^\top \mathbf{V}^{-1}(\mathbf{Y}-\mathbf{X}\hat{\boldsymbol{\beta}}) \right\}
+  $$
+
+---
+
+## Intuition: Why REML?
+
+- ML treats $\boldsymbol{\beta}$ as fixed → variance component estimates biased downward  
+- REML removes fixed effects before estimating variance components  
+- Equivalent to maximizing likelihood of **linear combinations of data that eliminate $\boldsymbol{\beta}$**
+
+---
+
+## Simple Example
+
+- OLS regression with small $n$, variance estimate:  
+  - ML: $\hat{\sigma}^2 = \frac{1}{n}\sum (y_i - \hat{y}_i)^2$ (biased)  
+  - REML (like unbiased variance): $\hat{\sigma}^2 = \frac{1}{n-p}\sum (y_i - \hat{y}_i)^2$  
+- REML adjusts for $p$ estimated fixed effects
+
+---
+
+## Advantages of REML
+
+- Less biased variance component estimates, especially in small samples  
+- Works well for random effects models (LME)  
+- Preferred default in many software (e.g., **nlme::lme**, **lme4::lmer**)
+
+---
+
+## Disadvantages of REML
+
+- REML likelihood depends on fixed-effects design matrix $\mathbf{X}$  
+  - Cannot compare models with **different fixed effects** using REML likelihood ratio tests  
+- Computationally heavier than ML (though usually manageable)  
+
+---
+
+## ML vs REML: When to Use
+
+- **Use ML** when:
+  - Comparing models with different fixed effects (hypothesis tests, model selection)  
+- **Use REML** when:
+  - Estimating variance components (default for random effects models)  
+  - Small sample sizes → reduce bias
+
+---
+
+## Visualization: Bias in Variance Estimates
+
+- Typically: ML underestimates variance  
+- REML closer to true variability
+
+## Visualization: Bias in Variance Estimates
+
+```{r}
+#| echo: true
+#| output-location: slide
+set.seed(667)
+library(nlme)
+
+# Simulate small dataset
+dat <- data.frame(id = rep(1:20, each=3),
+                  time = rep(1:3, times=20))
+dat$y <- 1 + 0.5*dat$time + rnorm(60, sd=1) + rnorm(20)[dat$id]
+
+# Fit ML and REML
+fit_ml   <- lme(y ~ time, random= ~1|id, data=dat, method="ML")
+fit_reml <- lme(y ~ time, random= ~1|id, data=dat, method="REML")
+
+c("ML Var(Intercept)"   = VarCorr(fit_ml)[1, "Variance"],
+  "REML Var(Intercept)" = VarCorr(fit_reml)[1, "Variance"])
+```
+
+
+
+---
+
+## Takeaways
+
+- REML corrects small-sample bias in variance estimates  
+- Use ML for **fixed effects comparisons**, REML for **variance components**  
+- Always check software defaults!

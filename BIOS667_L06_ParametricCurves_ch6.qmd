@@ -1,0 +1,788 @@
+---
+title: "BIOS 667 — Lecture 6: Modeling the Mean — Parametric Curves (Ch. 6)"
+subtitle: "Fitzmaurice, Laird & Ware (2011)"
+author: "UNC-CH Biostatistics"
+format:
+  revealjs:
+    theme: simple
+    slide-number: true
+    hash: true
+    toc: false
+    code-overflow: wrap
+    code-line-numbers: false
+    math: mathjax
+    css: "unc-gillings.css"
+    fig-width: 9
+    fig-height: 5.2
+    footer: "BIOS 667 · UNC-CH Biostatistics · Fall 2025"
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+## Retrieval — from Lecture 5 {.small}
+- **Profiles (time as factor)**: arm×time means; interaction = **parallelism**; focused **1-df** contrasts.  
+- **Efficiency** via working $\mathbf{V}$; inference about **means** (Ch. 7 handles covariance selection).  
+- **When to switch to curves**: many/irregular times, want rate-of-change/slopes, smoother trends.
+
+
+---
+
+## Quick recap from L5 (profiles) {.small}
+- Time as a **factor**: focus on **means at visits** and **parallelism** (arm×time).  
+- **1‑df** summaries (equal-weight, AUC) answered “overall post-baseline difference?”.  
+- **Today:** time is **numeric** → we study **rates/curvature** and still answer visit‑specific questions via `emmeans`.
+
+---
+
+## Today’s goals {.small}
+- Understand **parametric curves** for longitudinal means: **polynomials** (linear, quadratic) and **linear splines**.  
+- Know when to prefer **curves** vs **profiles**; interpret parameters (slopes, turning points, segment slopes).  
+- Fit, visualize, and compare models in R; use **hierarchical testing** (quadratic vs linear).  
+- Practice with two archetypes: **FEV1 (linear trend)** and **TLC (piecewise linear)**.
+
+
+---
+
+## Profiles → Curves: what changed? {.small}
+- **Time** is now **numeric** (not a factor); we model **shape/rate** (slopes/curvature).  
+- Parameters: intercept = mean at **centering**; slope(s) = **rate of change**; quadratic gives **curvature/turning points**.  
+- Inference still targets the **mean**; working $\mathbf{V}$ used for **efficiency** (covariance choice in **Ch. 7**).
+
+---
+
+## Where curves fit (vs. profiles) {.small}
+- **Profiles (Ch. 5):** focus on **means at planned visits**; great with small $J$ and aligned times.  
+- **Parametric curves (Ch. 6):** focus on **shape/rate**; handles **many/irregular** times; more **power** when model is right.  
+> If stakeholders ask “*How fast does it change?*” → curves are natural.
+
+
+---
+
+## Decision tree (recap) {.small}
+- **Visit-level questions & few aligned times** → **Profiles** (Ch. 5).  
+- **Shape/rate questions; many/irregular times** → **Parametric curves** (Ch. 6).  
+- **Best working correlation** → **Covariance diagnostics** (Ch. 7).
+
+---
+
+## Notation & GLM view {.small}
+- Observations: $Y_{ij}$ at time $t_{ij}$ for subject $i$; group $a \in \{\text{A},\text{B}\}$.  
+- Mean model: $\mathbb{E}(Y_{ij}\mid \mathbf{X}_{ij}) = \mathbf{X}_{ij}\boldsymbol{\beta}$ with time **numeric**.  
+- **Linear** trend (two groups):  
+  $\mathbb{E}(Y_{ij}) = \beta_0 + \beta_1 t_{ij} + \beta_2 \text{group}_i + \beta_3 (t_{ij}\times \text{group}_i)$.  
+- **Quadratic**: add $\beta_4 t_{ij}^2 + \beta_5 (t_{ij}^2 \times \text{group}_i)$.  
+- **Spline** (knot at $t^{*}$): include $(t_{ij}-t^{*})_{+}$.
+
+
+---
+
+## Linear / Quadratic: Equation → Words → Coefficients {.small}
+Model (centered time):  
+$\;\mathbb{E}(Y) = \beta_0 + \beta_1 t_c + \beta_2 \text{group} + \beta_3 (t_c \times \text{group}) \;[+\, \beta_4 t_c^2 + \beta_5 (t_c^2 \times \text{group})].$
+
+- **Words:** $\beta_0$ = mean at $t_c{=}0$ (the centering point).  
+  $\beta_1$ = slope in reference group; $\beta_3$ = **slope difference** in non‑ref group.  
+  If quadratic: $\beta_4$ controls **curvature**; $\beta_5$ is curvature difference.
+- **Tip:** Choose centering so $\beta_0$ is scientifically meaningful (e.g., baseline or mid‑study).
+
+---
+
+## Centering & hierarchy {.small}
+- **Centering** time (e.g., at mean time) reduces collinearity when including $t^2$.  
+- **Hierarchy**: test/remove **higher-order** first (e.g., quadratic), then assess **linear**; interpret slopes at the chosen centering.
+
+---
+
+## Setup: consistent aesthetics & helpers {.small}
+```{r}
+set.seed(6)
+arm_cols <- c(Placebo="gray40", Drug="#1369B0",
+              Former="gray40", Current="#1369B0",
+              Succimer="#1369B0")
+ok_gg  <- requireNamespace("ggplot2", quietly=TRUE)
+ok_d   <- requireNamespace("dplyr", quietly=TRUE)
+ok_tid <- requireNamespace("tidyr", quietly=TRUE)
+ok_nlme<- requireNamespace("nlme", quietly=TRUE)
+ok_emm <- requireNamespace("emmeans", quietly=TRUE)
+
+if (ok_nlme) {
+  library(nlme)
+  safe_gls <- function(form, data, corr=NULL, ...) {
+    # Preserve environment for inline symbols (e.g., wkp), and store literal formula
+    if (inherits(form, "formula")) {
+      fobj <- form
+      if (is.null(environment(fobj))) environment(fobj) <- parent.frame()
+    } else {
+      fobj <- stats::as.formula(form, env = parent.frame())
+    }
+    fit <- try(nlme::gls(model = fobj, data = data, correlation = corr, ...), silent = TRUE)
+    if (inherits(fit, "try-error")) {
+      fit <- nlme::gls(model = fobj, data = data, method = "REML")
+    }
+    fit$call$model <- fobj
+    fit
+  }
+}
+```
+
+---
+
+## Case A (FEV1-like): simulate irregular times {.small}
+```{r}
+# Simulate 133 subjects, irregular times (0,3,6,9,12,15,19 years), two smoking groups
+N <- 133
+times <- c(0,3,6,9,12,15,19)
+id <- rep(seq_len(N), each=length(times))
+time <- rep(times, N)
+group <- rep(sample(c("Former","Current"), N, TRUE, prob=c(0.5,0.5)), each=length(times))
+
+# Linear decline; Current declines slightly faster
+mu0 <- 3.50; slope_F <- -0.033; slope_C_delta <- -0.005
+slope <- ifelse(group=="Current", slope_F + slope_C_delta, slope_F)
+mu <- mu0 + slope*time
+
+# AR(1)-ish within-subject noise
+rho <- 0.6; sig <- 0.20; u <- rnorm(N,0,0.25); y <- numeric(length(id))
+for (i in seq_len(N)) {
+  idx <- which(id==i); y[idx][1] <- mu[idx][1] + u[i] + rnorm(1,0,sig)
+  for (k in 2:length(idx)) y[idx][k] <- mu[idx][k] + u[i] + rho*(y[idx][k-1]-mu[idx][k-1]-u[i]) + rnorm(1,0,sig*sqrt(1-rho^2))
+}
+fev <- data.frame(id=factor(id), time=time, group=factor(group), y=y)
+```
+
+---
+
+## Visualize trends (means by group) {.small}
+```{r}
+if (ok_gg) {
+  library(ggplot2)
+  library(dplyr)
+  summ <- fev |> dplyr::group_by(group, time) |> dplyr::summarise(m=mean(y), .groups="drop")
+  ggplot(summ, aes(time, m, color=group)) +
+    geom_line(linewidth=1.1) + geom_point() +
+    scale_color_manual(values=arm_cols) +
+    labs(title="FEV1-like means by group", x="Time (years)", y="Mean") +
+    theme(legend.position="bottom") -> p_fev
+  print(p_fev)
+} else cat("Install ggplot2 for plots.\n")
+```
+> **So what?** Visual trend suggests linear decline; group slopes may differ slightly.
+
+
+---
+
+## Diagnostics (quick checks) {.small}
+```{r}
+if (ok_gg && ok_nlme && exists("fit_lin")) {
+  library(ggplot2)
+  fev$res_lin <- residuals(fit_lin, type="normalized")
+  ggplot(fev, aes(time, res_lin)) + geom_point(alpha=0.3) +
+    geom_smooth(se=FALSE, method="loess") +
+    labs(title="Residuals vs time (linear fit)", y="Normalized residuals", x="Time")
+} else {
+  cat("Fit a linear model (fit_lin) and install ggplot2 to view residual diagnostics.\n")
+}
+```
+> Curvature in residuals vs time suggests adding **quadratic** or a **knot**.
+
+
+
+---
+
+## Diagnostics (panel) {.panelset .small}
+### Residuals vs time (linear)
+```{r}
+if (ok_gg && ok_nlme && exists("fit_lin")) {
+  library(ggplot2)
+  fev$res_lin <- residuals(fit_lin, type="normalized")
+  ggplot(fev, aes(time, res_lin)) + geom_point(alpha=0.3) +
+    geom_smooth(se=FALSE, method="loess") +
+    labs(y="Normalized residuals", x="Time (years)")
+} else { cat("Fit a linear model (fit_lin) for residuals plot.\n") }
+```
+### Observed vs fitted (spline)
+```{r}
+if (ok_gg && ok_nlme && exists("f_spl")) {
+  library(dplyr); library(ggplot2)
+  s_fit <- tlc |> dplyr::group_by(arm, week) |> dplyr::summarise(m=mean(y), .groups="drop")
+  neww <- expand.grid(week = sort(unique(tlc$week)), arm = levels(tlc$arm))
+  neww$w1 <- pmax(neww$week - 1, 0)
+  preds <- predict(f_spl, newdata=neww)
+  ggplot() + geom_point(data=s_fit, aes(week, m, color=arm)) +
+    geom_line(data=cbind(neww, fit=preds), aes(week, fit, color=arm), linetype="dashed", linewidth=1.1) +
+    scale_color_manual(values=arm_cols) + labs(y="Mean TLC", x="Week")
+} else { cat("Fit the spline model (f_spl) to view observed vs fitted.") }
+```
+### Partial residual for $t_c^2$ (optional)
+```{r}
+if (ok_nlme && requireNamespace("car", quietly=TRUE) && exists("fit_quad")) {
+  library(car)
+  # Component+residual plot for t_c^2 term (uses 'lm' interface; fallback via lm on fev for visualization)
+  fit_lm_quad <- lm(y ~ group * (time_c + I(time_c^2)), data=fev)
+  crPlots(fit_lm_quad, ~ I(time_c^2))
+} else {
+  cat("Install 'car' and ensure fit_quad exists to show partial residual for t_c^2.\n")
+}
+```
+
+---
+
+## Gotchas to avoid {.small}
+- LR tests require **ML** (not REML).  
+- For spline predictions, create the basis in **newdata** (e.g., `neww$w1 <- pmax(neww$week-1,0)`).  
+- When profiling knots, include the basis column in the **data** you pass to `gls()`.  
+- Center before quadratics to keep $\\beta_0$ interpretable and reduce collinearity.
+
+---
+
+## Fit linear vs quadratic trends {.small}
+```{r}
+if (ok_nlme) {
+  fev$time_c <- fev$time - mean(fev$time)  # centering
+  fit_lin <- safe_gls(y ~ group * time_c, data=fev, corr = corCompSymm(~1|id), method="REML")
+  fit_quad<- safe_gls(y ~ group * (time_c + I(time_c^2)), data=fev, corr = corCompSymm(~1|id), method="ML")
+  fit_lin_ml <- safe_gls(y ~ group * time_c, data=fev, corr = corCompSymm(~1|id), method="ML")
+  LR <- 2*(logLik(fit_quad) - logLik(fit_lin_ml))
+  cat("LR test (quad vs lin):", as.numeric(LR), "df=2\n")
+  print(summary(fit_lin)$tTable)
+} else cat("Install nlme to fit GLS models.\n")
+```
+> **So what?** If LR is small, linear suffices; otherwise consider quadratic.
+
+
+
+
+---
+
+## Quadratic turning point (with example) {.small}
+> *Why a turning point?* Many biological processes show an early response then plateau/rebound; the quadratic captures a single bend.
+For centered time $t_c$, a quadratic has a turning point at
+\[
+t_c^{\star} = -\frac{\beta_{t}}{2\,\beta_{t^2}}
+\quad\Rightarrow\quad
+t^{\star} = t_c^{\star} + \overline{t}.
+\]
+```{r}
+if (ok_nlme) {
+  # Ensure group levels and centered time used in the quadratic model
+  fev$group <- factor(fev$group, levels = c("Former","Current"))
+  fev$time_c <- fev$time - mean(fev$time)
+  fit_quad <- safe_gls(y ~ group * (time_c + I(time_c^2)), data = fev,
+                       corr = corCompSymm(~1|id), method = "ML")
+  cf <- coef(fit_quad)
+
+  # Reference group (Former)
+  b_t  <- unname(cf["time_c"])
+  b_t2 <- unname(cf["I(time_c^2)"])
+
+  # Other group (Current) adds interactions if present
+  b_t_C  <- b_t  + if ("groupCurrent:time_c" %in% names(cf)) cf["groupCurrent:time_c"] else 0
+  b_t2_C <- b_t2 + if ("groupCurrent:I(time_c^2)" %in% names(cf)) cf["groupCurrent:I(time_c^2)"] else 0
+
+  tbar <- mean(fev$time)
+
+  # Safe guards: only compute turning points if curvature exists
+  has_curv_ref <- !is.na(b_t2)  &&  abs(b_t2)  > .Machine$double.eps
+  has_curv_cur <- !is.na(b_t2_C) &&  abs(b_t2_C) > .Machine$double.eps
+
+  tp_ref <- if (has_curv_ref) { -b_t  / (2*b_t2)  + tbar } else { NA_real_ }
+  tp_cur <- if (has_curv_cur) { -b_t_C / (2*b_t2_C) + tbar } else { NA_real_ }
+
+  out <- data.frame(group = c("Former","Current"),
+                    t_star = round(c(tp_ref, tp_cur), 3))
+  print(out)
+} else {
+  cat("Install nlme to fit the quadratic model and compute turning points.\n")
+}
+```
+> Interpret $t^{\star}$ in study units (e.g., years). If $\\beta_{t^2}\\approx 0$, a linear trend may suffice.
+
+---
+
+## Slope inference with `emtrends` {.small}
+```{r}
+if (ok_emm && exists("fit_lin")) {
+  library(emmeans)
+  emt <- emtrends(fit_lin, ~ group, var = "time_c")
+  print(emt)
+  print(contrast(emt, "pairwise"))
+} else {
+  cat("Fit a linear model (fit_lin) and install emmeans to compute slope contrasts.\n")
+}
+```
+> Mirrors Ch. 5’s 1‑df contrasts, but now the estimand is a **slope**.
+
+
+---
+
+## Contrast chooser (what to estimate?) {.small}
+| Question | R tool | Example |
+|---|---|---|
+| **Slope difference** between arms at centering | `emtrends` | `emtrends(fit_lin, ~ group, var="time_c")` |
+| **Mean difference at time = k** | `emmeans` | `emmeans(fit_spl, ~ arm, at=list(week=k, w1=pmax(k-1,0)))` |
+| **Arm effect averaged over times** | `emmeans` on profiles | `emmeans(fit_prof, pairwise ~ arm)` |
+| **Change from baseline** | 1‑df contrast (Ch5) or model on \(Y - Y_0\) | (see L05) |
+
+---
+
+## Centering, scaling, and orthogonal polynomials {.small}
+- **Center** time (e.g., subtract mean) so $\\beta_0$ is interpretable and collinearity is reduced.  
+- **Scale** if needed (divide by SD) for numerical stability with higher-degree terms.  
+- **Orthogonal polynomials** (`poly(time_c, 2, raw = FALSE)`) reduce collinearity; coefficients are less directly interpretable but tests are stable.
+```{r}
+if (ok_nlme) {
+  fev$time_s <- as.numeric(scale(fev$time, center=TRUE, scale=TRUE))
+  fit_poly <- safe_gls(y ~ group * poly(time_s, 2, raw = FALSE), data=fev,
+                       corr = corCompSymm(~1|id), method="ML")
+  cat("AIC (orthogonal degree-2):", AIC(fit_poly), "\n")
+} else cat("Install nlme to fit GLS models.\n")
+```
+> Use **hierarchical tests** (ML) or AIC/BIC to decide degree.
+
+---
+
+## Case B (TLC-like): piecewise linear (knot at week 1) {.small}
+```{r}
+# TLC-like: four planned weeks 0,1,4,6; Placebo vs Succimer; sharp early drop then flatten/rebound
+n <- 200; weeks <- c(0,1,4,6)
+id2 <- rep(seq_len(n), each=length(weeks))
+week <- rep(weeks, n)
+arm <- rep(sample(c("Placebo","Succimer"), n, TRUE), each=length(weeks))
+
+# Means: Placebo ~ flat decline; Succimer big drop at week1 then rebound
+muP <- 26 + c(0, -1.6, -2.2, -2.6)
+muS <- 26 + c(0, -12.8, -9.6, -7.2)
+mu <- ifelse(arm=="Placebo", muP[match(week, weeks)], muS[match(week, weeks)])
+
+rho <- 0.5; sig <- 6; u2 <- rnorm(n,0,3); y2 <- numeric(length(id2))
+for (i in seq_len(n)) {
+  idx <- which(id2==i); y2[idx][1] <- mu[idx][1] + u2[i] + rnorm(1,0,sig)
+  for (k in 2:length(idx)) y2[idx][k] <- mu[idx][k] + u2[i] + rho*(y2[idx][k-1]-mu[idx][k-1]-u2[i]) + rnorm(1,0,sig*sqrt(1-rho^2))
+}
+tlc <- data.frame(id=factor(id2), week=week, arm=factor(arm), y=y2)
+```
+
+---
+
+## Visualize TLC means {.small}
+```{r}
+if (ok_gg) {
+  library(ggplot2); library(dplyr)
+  s2 <- tlc |> dplyr::group_by(arm, week) |> dplyr::summarise(m=mean(y), .groups="drop")
+  ggplot(s2, aes(week, m, color=arm)) + geom_line(linewidth=1.1) + geom_point() +
+    scale_color_manual(values=arm_cols) +
+    labs(title="TLC means by arm", x="Week", y="Mean lead level") +
+    theme(legend.position="bottom") -> p_tlc
+  print(p_tlc)
+}
+```
+> **So what?** Succimer drops sharply at week 1 then rebounds—suggests a **knot** at 1.
+
+---
+
+## Fit spline with common knot at 1 {.small}
+```{r}
+if (ok_nlme) {
+  tlc$w1 <- pmax(tlc$week - 1, 0)
+  fit_lin  <- safe_gls(y ~ arm * week, data=tlc, corr = corCompSymm(~1|id), method="ML")
+  fit_spl  <- safe_gls(y ~ arm * (week + w1), data=tlc, corr = corCompSymm(~1|id), method="ML")
+  LR2 <- 2*(logLik(fit_spl) - logLik(fit_lin))
+  cat("LR test (spline vs linear):", as.numeric(LR2), "df=2\n")
+  print(summary(fit_spl)$tTable)
+} else cat("Install nlme to fit GLS models.\n")
+```
+> **So what?** A large LR supports the **knot at week 1** (better fit than single linear trend).
+
+
+---
+
+## Linear spline parameterization (knot at $t^{*}$) {.small}
+Model:$\mathbb{E}(Y) = \beta_0 + \beta_1 t + \beta_2 (t - t^{*})_{+} + \beta_3 \text{arm} + \beta_4 (t\times\text{arm}) + \beta_5 ((t - t^{*})_{+}\times\text{arm}).$- **Before** the knot ($t < t^{*}$): slope in arm A is$\beta_1$; in arm B is$\beta_1 + \beta_4$.  
+- **After** the knot ($t \\ge t^{*}$): slope in arm A is$\beta_1 + \beta_2$; in arm B is$\beta_1 + \beta_2 + \beta_4 + \beta_5$.  
+- Continuity at$t^{*}$is enforced by the$(t - t^{*})_{+}$term.
+
+
+
+> **Pre-/post-knot slopes (at knot $t^{*}$)**  
+> Ref arm: pre = $\beta_1$, post = $\beta_1{+}\beta_2$.  
+> Other arm: pre = $\beta_1{+}\beta_4$, post = $\beta_1{+}\beta_2{+}\beta_4{+}\beta_5$.
+
+```{r}
+# If a spline model exists, compute numeric pre/post slopes per arm
+if (exists("f_spl")) {
+  cf <- coef(f_spl)
+  # Identify arms generically
+  alev <- levels(tlc$arm)
+  ref  <- alev[1]; oth <- alev[2]
+  b_t   <- unname(cf["week"])
+  b_w1  <- if ("w1" %in% names(cf)) unname(cf["w1"]) else 0
+  b_a   <- 0  # intercept shift not used in slopes
+  # Interaction names depend on factor level
+  i_week <- paste0("arm", oth, ":week")
+  i_w1   <- paste0("arm", oth, ":w1")
+  b_iw   <- if (i_week %in% names(cf)) unname(cf[i_week]) else 0
+  b_iw1  <- if (i_w1   %in% names(cf)) unname(cf[i_w1])   else 0
+  # Slopes: pre uses 'week' only; post adds 'w1'
+  pre_ref  <- b_t
+  post_ref <- b_t + b_w1
+  pre_oth  <- b_t + b_iw
+  post_oth <- b_t + b_w1 + b_iw + b_iw1
+  tab <- data.frame(arm = c(ref, ref, oth, oth),
+                    segment = c("pre-knot","post-knot","pre-knot","post-knot"),
+                    slope = round(c(pre_ref, post_ref, pre_oth, post_oth), 3))
+  print(tab)
+} else {
+  cat("Fit the spline model (f_spl) to show numeric pre/post slopes.")
+}
+```
+
+
+
+**Micro‑recipe (spline@1)**  
+1) `tlc$w1 <- pmax(tlc$week - 1, 0)`  
+2) `f_spl <- gls(y ~ arm * (week + w1), data=tlc, ...)`  
+3) `new$w1 <- pmax(new$week - 1, 0); predict(f_spl, new)`  
+4) Interpret slopes using the pre/post formulas above.
+
+
+---
+
+## Spline (knot $t^{*}$): Equation → Words → Coefficients {.small}
+Model: $\mathbb{E}(Y)=\beta_0 + \beta_1 t + \beta_2 (t - t^{*})_{+} + \beta_3 \text{arm} + \beta_4 (t\times\text{arm}) + \beta_5 ((t - t^{*})_{+}\times\text{arm})$.
+
+- **Words:** pre‑knot slope (ref arm) = $\beta_1$; post‑knot slope (ref) = $\beta_1+\beta_2$.  
+  Arm modifies slope by $\beta_4$ (pre‑knot) and $\beta_4+\beta_5$ (post‑knot).  
+- **Estimands:** slope difference pre‑knot = $\beta_4$; post‑knot = $\beta_4+\beta_5$.  
+
+---
+
+## Visualize fitted curves {.small}
+```{r}
+if (ok_gg && ok_nlme && exists("fit_spl")) {
+  tlc$fit <- as.numeric(predict(fit_spl))
+  library(dplyr)
+  s_fit <- tlc |> dplyr::group_by(arm, week) |> dplyr::summarise(m=mean(y), f=mean(fit), .groups="drop")
+  library(ggplot2)
+  ggplot(s_fit, aes(week, m, color=arm)) +
+    geom_point() + geom_line(linewidth=1.1) +
+    geom_line(aes(y=f), linetype="dashed", linewidth=1.1) +
+    scale_color_manual(values=arm_cols) +
+    labs(title="Observed vs fitted means (spline)", y="Mean", x="Week") -> p_fit
+  print(p_fit)
+}
+```
+> **So what?** Dashed lines (fitted) should track observed means; misfit suggests either mean model or $\mathbf{V}$ needs work.
+
+
+
+
+
+---
+
+## Side‑by‑side: linear vs quadratic vs spline {.small}
+::: columns
+::: column
+**Linear**
+```{r}
+if (ok_gg && ok_nlme) {
+  if (!exists("f_lin")) f_lin <- safe_gls(y ~ arm * week, data=tlc, corr=corCompSymm(~1|id), method="ML")
+  neww <- data.frame(week = sort(unique(tlc$week)),
+                     arm = factor(rep(levels(tlc$arm), each=length(sort(unique(tlc$week)))),
+                                  levels=levels(tlc$arm)))
+  if (!exists("s2")) {
+    library(dplyr); s2 <- tlc |> dplyr::group_by(arm, week) |> dplyr::summarise(m=mean(y), .groups="drop")
+  }
+  pred <- predict(f_lin, newdata=neww)
+  library(ggplot2)
+  ggplot() + geom_point(data=s2, aes(week, m, color=arm)) +
+    geom_line(data=cbind(neww, fit=pred), aes(week, fit, color=arm), linetype="dashed", linewidth=1.1) +
+    scale_color_manual(values=arm_cols) + labs(y="Mean", x="Week")
+}
+```
+:::
+::: column
+**Quadratic**
+```{r}
+if (ok_gg && ok_nlme) {
+  f_quad <- safe_gls(y ~ arm * (week + I(week^2)), data=tlc, corr=corCompSymm(~1|id), method="ML")
+  predq <- predict(f_quad, newdata=neww)
+  library(ggplot2)
+  ggplot() + geom_point(data=s2, aes(week, m, color=arm)) +
+    geom_line(data=cbind(neww, fit=predq), aes(week, fit, color=arm), linetype="dashed", linewidth=1.1) +
+    scale_color_manual(values=arm_cols) + labs(y="Mean", x="Week")
+}
+```
+:::
+::: column
+**Spline (knot=1)**
+```{r}
+if (ok_gg && ok_nlme) {
+  tlc$w1 <- pmax(tlc$week - 1, 0)
+  f_spl <- safe_gls(y ~ arm * (week + w1), data=tlc, corr=corCompSymm(~1|id), method="ML")
+  neww$w1 <- pmax(neww$week - 1, 0)
+  preds <- predict(f_spl, newdata=neww)
+  library(ggplot2)
+  ggplot() + geom_point(data=s2, aes(week, m, color=arm)) +
+    geom_line(data=cbind(neww, fit=preds), aes(week, fit, color=arm), linetype="dashed", linewidth=1.1) +
+    scale_color_manual(values=arm_cols) + labs(y="Mean", x="Week")
+}
+```
+:::
+:::
+> Same scale; dashed = **fitted**, points = **observed means**.
+
+---
+
+## Compare fits (panel): linear vs quadratic vs spline {.panelset .small}
+### Linear
+```{r}
+if (ok_gg && ok_nlme) {
+  neww <- data.frame(week = sort(unique(tlc$week)),
+                     arm = factor(rep(levels(tlc$arm), each=length(sort(unique(tlc$week)))),
+                                  levels=levels(tlc$arm)))
+  f_lin <- safe_gls(y ~ arm * week, data=tlc, corr=corCompSymm(~1|id), method="ML")
+  pred <- predict(f_lin, newdata=neww)
+  library(ggplot2); library(dplyr)
+  s2 <- tlc |> dplyr::group_by(arm, week) |> dplyr::summarise(m=mean(y), .groups="drop")
+  ggplot() +
+    geom_point(data=s2, aes(week, m, color=arm)) +
+    geom_line(data=cbind(neww, fit=pred), aes(week, fit, color=arm), linetype="dashed", linewidth=1.1) +
+    scale_color_manual(values=arm_cols) + labs(y="Mean", x="Week")
+} else cat("Install ggplot2 + nlme to compare fits.\n")
+```
+### Quadratic
+```{r}
+if (ok_gg && ok_nlme) {
+  f_quad <- safe_gls(y ~ arm * (week + I(week^2)), data=tlc, corr=corCompSymm(~1|id), method="ML")
+  predq <- predict(f_quad, newdata=neww)
+  ggplot() +
+    geom_point(data=s2, aes(week, m, color=arm)) +
+    geom_line(data=cbind(neww, fit=predq), aes(week, fit, color=arm), linetype="dashed", linewidth=1.1) +
+    scale_color_manual(values=arm_cols) + labs(y="Mean", x="Week")
+}
+```
+### Spline (knot=1)
+```{r}
+if (ok_gg && ok_nlme) {
+  tlc$w1 <- pmax(tlc$week - 1, 0)
+  f_spl <- safe_gls(y ~ arm * (week + w1), data=tlc, corr=corCompSymm(~1|id), method="ML")
+  neww$w1 <- pmax(neww$week - 1, 0)
+  preds <- predict(f_spl, newdata=neww)
+  ggplot() +
+    geom_point(data=s2, aes(week, m, color=arm)) +
+    geom_line(data=cbind(neww, fit=preds), aes(week, fit, color=arm), linetype="dashed", linewidth=1.1) +
+    scale_color_manual(values=arm_cols) + labs(y="Mean", x="Week")
+}
+```
+
+---
+
+## Visit-specific mean difference (e.g., week 6) {.small}
+```{r}
+if (ok_emm && exists("fit_spl")) {
+  library(emmeans)
+  em6 <- emmeans(fit_spl, ~ arm, at = list(week = 6, w1 = 5), data = tlc)
+  print(em6)
+  print(contrast(em6, "pairwise"))
+} else {
+  cat("Fit the spline model (fit_spl) and install emmeans to estimate mean differences at a specific time.\n")
+}
+```
+> Curves answer **rate/shape** questions; `emmeans` ties back to **visit-specific** questions.
+
+
+---
+
+## Consistency check: curve vs profiles at visits {.small}
+Compare curve‑implied means to LS‑means from a **profiles** model at the same visits.
+```{r}
+if (ok_nlme && ok_emm) {
+  # Profiles model with time as factor
+  tlc$time_f <- factor(tlc$week)
+  fit_prof <- safe_gls(y ~ arm * time_f, data=tlc, corr = corCompSymm(~1|id), method="ML")
+  library(emmeans)
+  # Curve means at week 1 and 6 using the spline model
+  if (!exists("f_spl")) {
+    tlc$w1 <- pmax(tlc$week - 1, 0)
+    f_spl <- safe_gls(y ~ arm * (week + w1), data=tlc, corr = corCompSymm(~1|id), method="ML")
+  }
+  wsel <- c(1,6)
+  neww <- expand.grid(week=wsel, arm=levels(tlc$arm))
+  neww$w1 <- pmax(neww$week - 1, 0)
+  pred_curve <- aggregate(predict(f_spl, newdata=neww), by=list(week=neww$week, arm=neww$arm), FUN=mean)
+  names(pred_curve)[3] <- "mu_curve"
+  # Profiles LS-means
+  em_prof <- emmeans(fit_prof, ~ arm | time_f)
+  summ_prof <- as.data.frame(em_prof)
+  summ_prof$week <- as.numeric(as.character(summ_prof$time_f))
+  tab_prof <- subset(summ_prof, week %in% wsel, select=c("week","arm","emmean"))
+  names(tab_prof)[3] <- "mu_profile"
+  comp <- merge(pred_curve, tab_prof, by=c("week","arm"), all=TRUE)
+  # Small table
+  comp <- comp[order(comp$week, comp$arm), ]
+  print(comp)
+} else {
+  cat("Install nlme + emmeans to compare curve vs profiles means.\n")
+}
+```
+> Means should generally align within SE at observed visits; large discrepancies flag misspecification.
+
+---
+
+## Choosing degree / knot(s) {.small}
+- **Hypotheses:** compare nested models with **LR tests (ML)**.  
+- **Information criteria:** AIC/BIC as tie-breakers.  
+- **Subject-matter:** expected timing of inflection/plateau.  
+- **Residuals:** check patterns vs time.
+
+```{r}
+if (ok_nlme && ok_gg) {
+  # Profile LR over candidate knots for TLC-like data
+  ks <- c(0.5, 1, 2, 3)
+  base_ml <- safe_gls(y ~ arm * week, data=tlc, corr=corCompSymm(~1|id), method="ML")
+  LRs <- sapply(ks, function(k) {
+  d <- tlc
+  d$wkp <- pmax(d$week - k, 0)
+  fitk <- safe_gls(y ~ arm * (week + wkp), data = d, corr = corCompSymm(~1|id), method = "ML")
+  2*(as.numeric(logLik(fitk)) - as.numeric(logLik(base_ml)))
+})
+  df <- data.frame(knot=ks, LR=LRs)
+  library(ggplot2)
+  ggplot(df, aes(knot, LR)) + geom_line() + geom_point() +
+    geom_hline(yintercept=qchisq(0.95, df=2), linetype="dashed") +
+    labs(title="Profile LR by knot (spline vs linear)", y="LR stat", x="Candidate knot")
+} else {
+  cat("Install nlme + ggplot2 to visualize LR by knot.\n")
+}
+```
+
+
+---
+
+## Choosing knots: subject‑matter heuristics {.small}
+- **Immediate pharmacodynamic effect** (e.g., week 1 after treatment start)
+- **End of treatment** (transition to maintenance)
+- **Post‑washout** (rebound/plateau expectation)
+- If unsure, **profile a small grid** of plausible knots and select the smallest adequate model (see LR profile slide).
+
+---
+
+## GLM matrices (sketch) {.small}
+- **Linear trend** (2 groups): columns for intercept, $t$, group, $t\times$group.  
+- **Quadratic trend**: add $t^2$ and $t^2\times$group.  
+- **Spline** (knot $t^{*}$): include $(t-t^{*})_{+}$ and its group interaction.  
+- All are special cases of $\mathbb{E}(\mathbf{Y}_i \mid \mathbf{X}_i)=\mathbf{X}_i\boldsymbol{\beta}$.
+
+---
+
+## Practice (in class, no laptops) {.small}
+- Write the **spline** mean functions (before/after $t^{*}$) for both arms from the model  
+  $\,\mathbb{E}(Y)=\beta_0+\beta_1 t + \beta_2 (t-t^{*})_{+} + \beta_3 \text{arm} + \beta_4 (t\times\text{arm}) + \beta_5 ((t-t^{*})_{+}\times\text{arm})$.  
+- What is the **slope** in each arm before and after the knot?
+
+
+---
+
+## Think–pair–share (2 min) {.small}
+- Where would you **center time** in your study and why? How does it change interpretation of $\\beta_0$?
+
+---
+
+## Paper exercise (no laptops) {.small}
+Given $t^{*}{=}1$ and the spline model, write the **pre‑** and **post‑knot** slopes in each arm.  
+Reveal: ref arm slopes = $\\beta_1$ (pre), $\\beta_1{+}\\beta_2$ (post); other arm adds $\\beta_4$ and $\\beta_4{+}\\beta_5$.
+
+
+---
+
+## Quick hinge practice (no laptops) {.small}
+With \(t^{*}{=}1\), compute \((t-1)_{+}\) for a few times:
+```{r}
+tvals <- c(0, 1, 4, 6)
+data.frame(t=tvals, hinge = pmax(tvals - 1, 0))
+```
+> You’ll need this when constructing `w1` in both the **data** and the **newdata** used for prediction.
+
+---
+
+## AI-augmented practice (outside class) {.small}
+- Ask an LLM to write R code to: (1) fit linear vs quadratic vs spline (knot=1), (2) compute the **LR tests**, (3) plot fitted vs observed.  
+- **Critique**: Are time variables **centered** for quadratic? Is the knot coded as $(t-1)_{+}$? Did it set **factor levels** and pass `data=` explicitly?
+
+
+---
+
+## AI‑aided homework hint {.small}
+Ask an LLM to: (1) fit linear vs quadratic vs spline, (2) do **ML LR tests**, (3) plot observed vs fitted, (4) compute `emtrends` slope difference.  
+**Checklist to validate**:  
+- Centering used? (`time_c`)  
+- ML for LR tests?  
+- Spline basis in **newdata** before `predict`?  
+- Arm/time factor levels set and `data=` passed explicitly?
+
+---
+
+## Minimal recipe (copy to your analysis) {.small}
+1) Set harmonized time variable(s); center if using $t^2$.  
+2) Choose candidate mean models (linear, quadratic, spline at plausible knots).  
+3) Fit via `gls()` with a reasonable working $\mathbf{V}$; compare models with **ML** for LR tests.  
+4) Plot observed vs **fitted** means; check residual diagnostics.  
+5) Report slopes/segment slopes and model choice; reserve covariance selection for **Ch. 7**.
+
+
+
+---
+
+## Recipe card you can copy {.small}
+1) Make `time_c` (center sensibly; optionally scale).  
+2) Fit **linear vs quadratic vs spline** with `gls()`; use **ML** for LR tests; pick with LR/AIC/BIC.  
+3) Report **slopes** with `emtrends`; tie back to **visit means** with `emmeans(at=list(time=...))`.  
+4) Plot observed vs **fitted**; check **residuals vs time**.  
+5) State your **estimand** (slope diff or mean at time) and why it matters.
+
+## When to prefer (rule‑of‑thumb) {.small}
+| Question/Pattern | Prefer |
+|---|---|
+| Monotone change, no visible bend | Linear |
+| Single bend / curvature | Quadratic |
+| Abrupt change then new slope | Spline (1 knot) |
+| Few aligned visits; visit‑specific | Profiles (Ch. 5) |
+
+---
+
+## Robust SEs (preview) {.small}
+- If working $\mathbf{V}$ is misspecified, **robust SEs** can protect inference on the mean parameters.  
+- We’ll revisit robust options (e.g., GEE sandwich, small-sample CR2) in later lectures; for now, focus on **mean specification**.
+
+---
+
+## Exit ticket {.small}
+1) Why might parametric curves be **more powerful** than profiles?  
+2) When would you **center time** and why?  
+3) What empirical sign points to a **knot** around week 1 in TLC?
+
+---
+
+## Resources {.small}
+- `?nlme::gls` — Generalized least squares for longitudinal means  
+- `?emmeans::emtrends` and `?emmeans` — Slope and mean contrasts  
+- `?splines::ns` — Natural splines (preview; smoothing/penalties in Ch. 19)
+
+
+---
+
+## Recipe & Gotchas (screenshot) {.small}
+**Recipe**  
+1) Create `time_c`; consider `scale()` for stability.  
+2) Fit candidates (linear, quadratic, spline@1); use **ML** for LR tests; compare AIC/BIC.  
+3) Report **slopes** with `emtrends`; **means at time** with `emmeans(at=...)`.  
+4) Plot observed vs **fitted** and **residuals vs time**.  
+5) State your **estimand** and why it matters.
+
+**Gotchas**  
+- LR tests → **ML** (not REML).  
+- For spline predictions, add basis to **newdata** (e.g., `neww$w1 <- pmax(neww$week-1,0)`).  
+- When profiling knots, include the basis column in the **data** you pass to `gls()`.  
+- Center before quadratics to keep \( \beta_0 \) meaningful and reduce collinearity.
